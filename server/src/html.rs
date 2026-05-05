@@ -8,11 +8,11 @@ pub fn page_start(title: &str) -> String {
 }
 
 pub fn page_start_with_head(title: &str, extra_head: &str) -> String {
-    crate::theme::active_theme_from_env().page_start(title, extra_head)
+    crate::theme::active_theme().page_start(title, extra_head)
 }
 
 pub fn page_end() -> String {
-    crate::theme::active_theme_from_env().page_end()
+    crate::theme::active_theme().page_end()
 }
 
 pub fn escape_html(value: &str) -> String {

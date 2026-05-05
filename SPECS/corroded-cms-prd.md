@@ -1268,7 +1268,8 @@ CMS-1405 — Object storage
 CMS-1406 — Theme system
 
 * Plugin architecture: each theme owns its shell, public templates, assets, default navigation, and footer groups behind a stable server-side theme plugin boundary.
-* Configurable active theme ID with validation against the registered plugin list.
+* Admin theme manager for reviewing registered plugins and switching the active theme.
+* Configurable active theme ID with validation against the registered plugin list and persistence in the site settings table.
 * Site settings table for editable site-level content and custom navigation.
 * GigaTier remains the first built-in/default theme plugin and reference implementation.
 
@@ -1277,6 +1278,14 @@ CMS-1407 — Comments
 * Moderation queue.
 * Spam prevention.
 * Optional anonymous comments.
+
+CMS-1408 — CMS-managed pages and navigation
+
+* First-class `pages` content type with title, slug/path, body Markdown/HTML, status, template, and SEO metadata.
+* Admin CRUD for pages at `/admin/pages`.
+* Public page routing with reserved-path protection for `/admin`, `/blog`, `/tags`, feeds, uploads, and other system routes.
+* Navigation manager for primary/footer links with ordering, labels, internal page targets, and custom URLs.
+* Theme plugins should render stored navigation and use plugin defaults only as fallback.
 
 ⸻
 

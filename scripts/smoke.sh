@@ -156,7 +156,26 @@ assert_status 200
 assert_contains "Dashboard"
 assert_contains "Published posts"
 assert_contains "Recent edits"
+assert_contains "Themes"
 capture_csrf_token
+
+request GET /admin/themes -b "$COOKIE_JAR" -c "$COOKIE_JAR"
+assert_status 200
+assert_contains "Themes"
+assert_contains "GigaTier"
+assert_contains "Plugin ID"
+assert_contains "name=\"active_theme\" value=\"gigatier\""
+assert_contains "Active Theme Details"
+
+form_post /admin/themes \
+    --data-urlencode "csrf_token=${CSRF_TOKEN}" \
+    --data-urlencode "active_theme=gigatier"
+assert_status 303
+assert_location /admin/themes
+
+request GET /admin/themes -b "$COOKIE_JAR" -c "$COOKIE_JAR"
+assert_status 200
+assert_contains "name=\"active_theme\" value=\"gigatier\" checked"
 
 request GET /admin/tags -b "$COOKIE_JAR" -c "$COOKIE_JAR"
 assert_status 200

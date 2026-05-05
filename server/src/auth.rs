@@ -678,6 +678,11 @@ fn dashboard_html(user: &AdminUser, data: &DashboardData, csrf_input: &str) -> H
                 <h2><a href="/admin/media">Media</a></h2>
                 <p>Uploaded assets</p>
             </article>
+            <article>
+                <p class="metric-value">1</p>
+                <h2><a href="/admin/themes">Themes</a></h2>
+                <p>Active theme plugin</p>
+            </article>
         </section>
         "#,
         escape_html(&user.display_name),

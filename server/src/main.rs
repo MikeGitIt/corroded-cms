@@ -73,6 +73,7 @@ async fn main() -> Result<()> {
     match cli.command.unwrap_or(Command::Serve) {
         Command::Serve => {
             run_migrations(&pool).await?;
+            theme::initialize_active_theme(&pool, &config.theme).await?;
             serve(config, pool).await
         }
         Command::Migrate => {
@@ -134,6 +135,10 @@ async fn serve(config: AppConfig, pool: PgPool) -> Result<()> {
         .route(
             "/admin/account",
             get(auth::account_page).post(auth::account_submit),
+        )
+        .route(
+            "/admin/themes",
+            get(theme::admin_page).post(theme::admin_update),
         )
         .route(
             "/admin/media",

@@ -175,14 +175,14 @@ Required environment variables are documented in `.env.example`:
 
 Optional runtime variables include `THEME`, `RUST_LOG`, `HOST`, `PORT`, and `MAX_UPLOAD_BYTES`.
 
-`THEME` selects the active theme plugin. The bundled default is `gigatier`; new themes should register through the server theme plugin boundary instead of hard-coding alternate page shells.
+`THEME` seeds the initial active theme plugin when `site_settings` does not have a stored selection. Admins can review and switch registered theme plugins at `/admin/themes`. The bundled default is `gigatier`; new themes should register through the server theme plugin boundary instead of hard-coding alternate page shells.
 
 ## Repository Layout
 
 - `app/` - Leptos app shell and CSS
 - `server/` - Axum server, admin/public routes, auth, feeds, uploads
 - `shared/` - shared validation and Markdown rendering logic
-- `migrations/` - SQLx PostgreSQL migrations
+- `migrations/` - SQLx PostgreSQL migrations, including persisted site settings
 - `scripts/` - local verification scripts
 - `SPECS/` - product requirements and implementation plan
 
