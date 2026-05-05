@@ -1,0 +1,222 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+BASE_URL="${BASE_URL:-http://127.0.0.1:3000}"
+ADMIN_EMAIL="${ADMIN_EMAIL:-admin@corroded.local}"
+ADMIN_PASSWORD="${ADMIN_PASSWORD:-TemporaryPass123!}"
+
+COOKIE_JAR="$(mktemp "${TMPDIR:-/tmp}/corroded-cms-cookies.XXXXXX")"
+BODY_FILE="$(mktemp "${TMPDIR:-/tmp}/corroded-cms-body.XXXXXX")"
+HEADER_FILE="$(mktemp "${TMPDIR:-/tmp}/corroded-cms-headers.XXXXXX")"
+PNG_FILE="$(mktemp "${TMPDIR:-/tmp}/corroded-cms-upload.XXXXXX")"
+BAD_UPLOAD_FILE="$(mktemp "${TMPDIR:-/tmp}/corroded-cms-bad-upload.XXXXXX")"
+trap 'rm -f "$COOKIE_JAR" "$BODY_FILE" "$HEADER_FILE" "$PNG_FILE" "$BAD_UPLOAD_FILE"' EXIT
+
+TEST_SLUG="smoke-$(date +%s)"
+TEST_TITLE="Smoke Test ${TEST_SLUG}"
+DRAFT_SLUG="${TEST_SLUG}-draft"
+DRAFT_TITLE="Smoke Draft ${TEST_SLUG}"
+TEST_TAG="Smoke Test"
+TEST_TAG_SLUG="smoke-test"
+TEST_ALT_TEXT="Smoke image ${TEST_SLUG}"
+
+fail() {
+    printf 'FAIL: %s\n' "$*" >&2
+    exit 1
+}
+
+request() {
+    local method="$1"
+    local path="$2"
+    shift 2
+
+    : >"$HEADER_FILE"
+    : >"$BODY_FILE"
+
+    curl -sS \
+        -X "$method" \
+        -D "$HEADER_FILE" \
+        -o "$BODY_FILE" \
+        "$@" \
+        "${BASE_URL}${path}" >/dev/null
+}
+
+status_code() {
+    awk 'toupper($0) ~ /^HTTP\// { code=$2 } END { print code }' "$HEADER_FILE"
+}
+
+header_value() {
+    local name="$1"
+    awk -v name="$name" 'BEGIN { IGNORECASE = 1 } $0 ~ "^" name ":" { sub("^[^:]+:[[:space:]]*", ""); sub("\r$", ""); print; exit }' "$HEADER_FILE"
+}
+
+assert_status() {
+    local expected="$1"
+    local actual
+    actual="$(status_code)"
+    [[ "$actual" == "$expected" ]] || fail "expected HTTP ${expected}, got ${actual}. Body: $(cat "$BODY_FILE")"
+}
+
+assert_location() {
+    local expected="$1"
+    local actual
+    actual="$(header_value location)"
+    [[ "$actual" == "$expected" ]] || fail "expected Location ${expected}, got ${actual}"
+}
+
+assert_contains() {
+    local expected="$1"
+    grep -Fq "$expected" "$BODY_FILE" || fail "expected response to contain: ${expected}"
+}
+
+assert_not_contains() {
+    local unexpected="$1"
+    if grep -Fq "$unexpected" "$BODY_FILE"; then
+        fail "expected response not to contain: ${unexpected}"
+    fi
+}
+
+form_post() {
+    local path="$1"
+    shift
+    request POST "$path" -b "$COOKIE_JAR" -c "$COOKIE_JAR" "$@"
+}
+
+write_fixture_uploads() {
+    local png_b64="iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/p9sAAAAASUVORK5CYII="
+    if ! printf '%s' "$png_b64" | base64 --decode >"$PNG_FILE" 2>/dev/null; then
+        printf '%s' "$png_b64" | base64 -D >"$PNG_FILE"
+    fi
+    printf 'not an image\n' >"$BAD_UPLOAD_FILE"
+}
+
+write_fixture_uploads
+
+printf 'Smoke testing %s\n' "$BASE_URL"
+
+request GET /healthz
+assert_status 204
+
+request GET /admin
+assert_status 303
+assert_location /admin/login
+
+request GET /admin/login
+assert_status 200
+assert_contains "Sign in"
+
+form_post /admin/login \
+    --data-urlencode "email=${ADMIN_EMAIL}" \
+    --data-urlencode "password=wrong-password"
+assert_status 200
+assert_contains "Invalid email or password."
+
+form_post /admin/login \
+    --data-urlencode "email=${ADMIN_EMAIL}" \
+    --data-urlencode "password=${ADMIN_PASSWORD}"
+assert_status 303
+assert_location /admin
+
+request GET /admin -b "$COOKIE_JAR" -c "$COOKIE_JAR"
+assert_status 200
+assert_contains "Dashboard"
+
+request GET /admin/media -b "$COOKIE_JAR" -c "$COOKIE_JAR"
+assert_status 200
+assert_contains "Media"
+
+form_post /admin/media \
+    -F "file=@${BAD_UPLOAD_FILE};filename=not-image.txt;type=text/plain"
+assert_status 400
+assert_contains "image must be a PNG, JPEG, GIF, or WebP file"
+
+form_post /admin/media \
+    -F "file=@${PNG_FILE};filename=smoke.png;type=image/png" \
+    -F "alt_text=${TEST_ALT_TEXT}"
+assert_status 303
+assert_location /admin/media
+
+request GET /admin/media -b "$COOKIE_JAR" -c "$COOKIE_JAR"
+assert_status 200
+assert_contains "$TEST_ALT_TEXT"
+assert_contains "smoke.png"
+assert_contains "/uploads/"
+UPLOADED_PATH="$(awk 'match($0, /\/uploads\/[^"]+/) { print substr($0, RSTART, RLENGTH); exit }' "$BODY_FILE")"
+[[ -n "$UPLOADED_PATH" ]] || fail "could not find uploaded media URL"
+
+request GET "$UPLOADED_PATH"
+assert_status 200
+
+request GET /admin/posts -b "$COOKIE_JAR" -c "$COOKIE_JAR"
+assert_status 200
+assert_contains "Posts"
+
+form_post /admin/posts \
+    --data-urlencode "title=${TEST_TITLE}" \
+    --data-urlencode "slug=${TEST_SLUG}" \
+    --data-urlencode "excerpt=Smoke test published post" \
+    --data-urlencode "status=published" \
+    --data-urlencode "tag_slugs=${TEST_TAG}" \
+    --data-urlencode $'body_markdown=# Smoke Test\n\nThis is **scripted** endpoint verification.'
+assert_status 303
+
+request GET /admin/posts -b "$COOKIE_JAR" -c "$COOKIE_JAR"
+assert_status 200
+assert_contains "$TEST_TITLE"
+
+request GET /blog
+assert_status 200
+assert_contains "$TEST_TITLE"
+
+request GET "/blog/${TEST_SLUG}"
+assert_status 200
+assert_contains "$TEST_TITLE"
+assert_contains "<strong>scripted</strong>"
+assert_not_contains "<script>"
+
+form_post /admin/posts \
+    --data-urlencode "title=${DRAFT_TITLE}" \
+    --data-urlencode "slug=${DRAFT_SLUG}" \
+    --data-urlencode "excerpt=Smoke test draft post" \
+    --data-urlencode "status=draft" \
+    --data-urlencode "tag_slugs=" \
+    --data-urlencode "body_markdown=Draft content"
+assert_status 303
+
+request GET "/blog/${DRAFT_SLUG}"
+assert_status 404
+
+request GET "/tags/${TEST_TAG_SLUG}"
+assert_status 200
+assert_contains "$TEST_TITLE"
+
+request GET /feed.xml
+assert_status 200
+assert_contains "<rss version=\"2.0\">"
+assert_contains "$TEST_TITLE"
+
+request GET /rss.xml
+assert_status 303
+assert_location /feed.xml
+
+request GET /sitemap.xml
+assert_status 200
+assert_contains "/blog/${TEST_SLUG}"
+assert_contains "/tags/${TEST_TAG_SLUG}"
+
+# These negative checks are expected 404s: drafts and missing resources must not publish.
+request GET /blog/__missing__
+assert_status 404
+
+request GET /tags/__missing__
+assert_status 404
+
+form_post /admin/logout
+assert_status 303
+assert_location /admin/login
+
+request GET /admin -b "$COOKIE_JAR" -c "$COOKIE_JAR"
+assert_status 303
+assert_location /admin/login
+
+printf 'Smoke test passed.\n'

@@ -1,0 +1,37 @@
+[package]
+name = "corroded-cms"
+version.workspace = true
+edition.workspace = true
+publish.workspace = true
+
+[dependencies]
+anyhow = { workspace = true }
+app = { path = "../app", default-features = false }
+argon2 = { workspace = true }
+axum = { workspace = true }
+chrono = { workspace = true }
+clap = { workspace = true }
+dotenvy = { workspace = true }
+leptos = { workspace = true }
+leptos_axum = { workspace = true }
+leptos_meta = { workspace = true }
+leptos_router = { workspace = true }
+rpassword = { workspace = true }
+serde = { workspace = true }
+sha2 = { workspace = true }
+shared = { path = "../shared", features = ["ssr"] }
+sqlx = { workspace = true }
+tokio = { workspace = true }
+tower-http = { workspace = true }
+tracing = { workspace = true }
+tracing-subscriber = { workspace = true }
+uuid = { workspace = true }
+
+[features]
+default = ["ssr"]
+ssr = [
+    "app/ssr",
+    "leptos/ssr",
+    "leptos_meta/ssr",
+    "leptos_router/ssr",
+]
