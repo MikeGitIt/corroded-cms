@@ -9,6 +9,16 @@ test:
 smoke:
     ./scripts/smoke.sh
 
+test-db-local:
+    ./scripts/dev-local-db-test.sh
+
+migrate:
+    cargo run -p corroded-cms -- migrate
+
+migrate-local:
+    cargo build -p corroded-cms
+    ./scripts/dev-local-migrate.sh
+
 db-up:
     docker compose up -d postgres
 

@@ -21,7 +21,12 @@ struct FeedPost {
 pub async fn rss(State(state): State<AppState>) -> Response {
     match list_feed_posts(&state).await {
         Ok(posts) => {
-            let xml = rss_xml(&state, &posts);
+            let xml = rss_xml(
+                &state.config.site_name,
+                &state.config.base_url,
+                &state.config.site_description,
+                &posts,
+            );
             (
                 StatusCode::OK,
                 [(CONTENT_TYPE, "application/rss+xml; charset=utf-8")],
@@ -131,18 +136,18 @@ async fn sitemap_urls(state: &AppState) -> anyhow::Result<Vec<(String, Option<Da
     Ok(urls)
 }
 
-fn rss_xml(state: &AppState, posts: &[FeedPost]) -> String {
+fn rss_xml(site_name: &str, base_url: &str, site_description: &str, posts: &[FeedPost]) -> String {
     let mut xml = String::from(r#"<?xml version="1.0" encoding="UTF-8"?>"#);
     xml.push_str(r#"<rss version="2.0"><channel>"#);
     xml.push_str(&format!(
         "<title>{}</title><link>{}</link><description>{}</description>",
-        xml_escape(&state.config.site_name),
-        xml_escape(&state.config.base_url),
-        xml_escape(&state.config.site_description)
+        xml_escape(site_name),
+        xml_escape(base_url),
+        xml_escape(site_description)
     ));
 
     for post in posts {
-        let link = format!("{}/blog/{}", state.config.base_url, post.slug);
+        let link = format!("{base_url}/blog/{}", post.slug);
         xml.push_str("<item>");
         xml.push_str(&format!(
             "<title>{}</title><link>{}</link><description>{}</description><pubDate>{}</pubDate><guid>{}</guid>",
@@ -189,4 +194,52 @@ fn xml_escape(value: &str) -> String {
 fn server_error(error: impl std::fmt::Debug) -> Response {
     tracing::error!(?error, "request failed");
     server_error_page()
+}
+
+#[cfg(test)]
+mod tests {
+    use chrono::{TimeZone, Utc};
+
+    use super::{FeedPost, rss_xml, sitemap_xml};
+
+    #[test]
+    fn rss_xml_escapes_and_uses_canonical_guids() {
+        let published_at = Utc.with_ymd_and_hms(2026, 5, 5, 10, 30, 0).unwrap();
+        let posts = vec![FeedPost {
+            title: "A & <B>".to_owned(),
+            slug: "hello-world".to_owned(),
+            excerpt: "Use \"quotes\" & apostrophe's".to_owned(),
+            published_at,
+        }];
+
+        let xml = rss_xml(
+            "Corroded & CMS",
+            "https://example.test",
+            "Rust <native> blogging",
+            &posts,
+        );
+
+        assert!(xml.contains("<title>Corroded &amp; CMS</title>"));
+        assert!(xml.contains("<description>Rust &lt;native&gt; blogging</description>"));
+        assert!(xml.contains("<title>A &amp; &lt;B&gt;</title>"));
+        assert!(xml.contains("<description>Use &quot;quotes&quot; &amp; apostrophe&apos;s</description>"));
+        assert!(xml.contains("<guid>https://example.test/blog/hello-world</guid>"));
+        assert!(xml.contains("May 2026 10:30:00 +0000</pubDate>"));
+    }
+
+    #[test]
+    fn sitemap_xml_includes_lastmod_and_escapes_locations() {
+        let updated_at = Utc.with_ymd_and_hms(2026, 5, 5, 22, 10, 0).unwrap();
+        let urls = vec![
+            ("https://example.test/blog/a&b".to_owned(), Some(updated_at)),
+            ("https://example.test/tags/rust".to_owned(), None),
+        ];
+
+        let xml = sitemap_xml(&urls);
+
+        assert!(xml.contains(r#"<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">"#));
+        assert!(xml.contains("<loc>https://example.test/blog/a&amp;b</loc>"));
+        assert!(xml.contains("<lastmod>2026-05-05</lastmod>"));
+        assert!(xml.contains("<loc>https://example.test/tags/rust</loc>"));
+    }
 }

@@ -13,6 +13,7 @@ pub struct Cli {
 #[derive(Debug, Subcommand)]
 pub enum Command {
     Serve,
+    Migrate,
     CreateAdmin {
         #[arg(long)]
         email: String,

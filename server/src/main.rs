@@ -68,12 +68,21 @@ async fn main() -> Result<()> {
     let pool = connect_database(&config).await?;
 
     match cli.command.unwrap_or(Command::Serve) {
-        Command::Serve => serve(config, pool).await,
+        Command::Serve => {
+            run_migrations(&pool).await?;
+            serve(config, pool).await
+        }
+        Command::Migrate => {
+            run_migrations(&pool).await?;
+            println!("Database migrations applied.");
+            Ok(())
+        }
         Command::CreateAdmin {
             email,
             display_name,
             password,
         } => {
+            run_migrations(&pool).await?;
             cli::create_admin(&pool, &email, display_name.as_deref(), password).await?;
             println!("Admin user created: {email}");
             Ok(())
@@ -143,6 +152,8 @@ async fn serve(config: AppConfig, pool: PgPool) -> Result<()> {
             "/admin/tags",
             get(tags::admin_list).post(tags::admin_create),
         )
+        .route("/admin/tags/{id}", post(tags::admin_update))
+        .route("/admin/tags/{id}/edit", get(tags::admin_edit))
         .route("/admin/tags/{id}/archive", post(tags::admin_archive))
         .nest_service("/uploads", uploads)
         .fallback(leptos_axum::file_and_error_handler::<AppState, _>(shell))
@@ -163,18 +174,19 @@ async fn serve(config: AppConfig, pool: PgPool) -> Result<()> {
 }
 
 async fn connect_database(config: &AppConfig) -> Result<PgPool> {
-    let pool = PgPoolOptions::new()
+    PgPoolOptions::new()
         .max_connections(5)
         .connect(&config.database_url)
         .await
-        .context("failed to connect to PostgreSQL")?;
+        .context("failed to connect to PostgreSQL")
+}
 
+async fn run_migrations(pool: &PgPool) -> Result<()> {
     sqlx::migrate!("../migrations")
-        .run(&pool)
+        .run(pool)
         .await
         .context("failed to run database migrations")?;
-
-    Ok(pool)
+    Ok(())
 }
 
 async fn healthz(State(state): State<AppState>) -> Response {
@@ -196,6 +208,7 @@ async fn response_headers(request: Request<Body>, next: Next) -> Response {
     let is_upload = request.uri().path().starts_with("/uploads/");
     let method = request.method().clone();
     let path = request.uri().path().to_owned();
+    let allow_preview_frame = path == "/admin/posts/preview";
     let request_id = request_id(&request);
     let started = Instant::now();
     let mut response = next.run(request).await;
@@ -207,11 +220,14 @@ async fn response_headers(request: Request<Body>, next: Next) -> Response {
     if let Ok(value) = HeaderValue::from_str(&request_id) {
         headers.insert(HeaderName::from_static("x-request-id"), value);
     }
+    let content_security_policy = if allow_preview_frame {
+        "default-src 'self'; base-uri 'self'; frame-ancestors 'self'; object-src 'none'; form-action 'self'; img-src 'self' data:; script-src 'self' 'wasm-unsafe-eval'; style-src 'self' 'unsafe-inline'; connect-src 'self' ws: wss:"
+    } else {
+        "default-src 'self'; base-uri 'self'; frame-ancestors 'none'; object-src 'none'; form-action 'self'; img-src 'self' data:; script-src 'self' 'wasm-unsafe-eval'; style-src 'self' 'unsafe-inline'; connect-src 'self' ws: wss:"
+    };
     headers.insert(
         CONTENT_SECURITY_POLICY,
-        HeaderValue::from_static(
-            "default-src 'self'; base-uri 'self'; frame-ancestors 'none'; object-src 'none'; form-action 'self'; img-src 'self' data:; script-src 'self' 'wasm-unsafe-eval'; style-src 'self' 'unsafe-inline'; connect-src 'self' ws: wss:",
-        ),
+        HeaderValue::from_static(content_security_policy),
     );
     headers.insert(X_CONTENT_TYPE_OPTIONS, HeaderValue::from_static("nosniff"));
     headers.insert(

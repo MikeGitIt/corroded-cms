@@ -39,6 +39,18 @@ CORRODED_CMS_ADMIN_PASSWORD='TemporaryPass123!' \
   --display-name Admin
 ```
 
+Apply database migrations without starting the web server:
+
+```bash
+cargo run -p corroded-cms -- migrate
+```
+
+For the same local PostgreSQL defaults used by `just restart-local`:
+
+```bash
+just migrate-local
+```
+
 Run the development server:
 
 ```bash
@@ -66,10 +78,26 @@ Override local defaults with `CORRODED_CMS_DB_USER`, `CORRODED_CMS_DATABASE_URL`
 ```bash
 just check       # cargo check --workspace
 just test        # cargo test --workspace
+just test-db-local # DB integration test with local PostgreSQL defaults
 just smoke       # endpoint smoke test against a running local server
+just migrate     # run pending database migrations
+just migrate-local # migrations with local PostgreSQL defaults
 cargo leptos build
 just restart     # rebuild, stop the local app server on PORT, and start it again
 just restart-local # same restart flow with local PostgreSQL defaults
+```
+
+DB integration tests are opt-in so the default test suite does not mutate an arbitrary local database:
+
+```bash
+TEST_DATABASE_URL='postgres://user@127.0.0.1:5432/corroded_cms_test' \
+  cargo test -p corroded-cms --test db_integration
+```
+
+For the local PostgreSQL defaults:
+
+```bash
+just test-db-local
 ```
 
 ## Docker

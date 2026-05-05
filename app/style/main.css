@@ -376,6 +376,22 @@ button:focus {
     margin-top: 0.75rem;
 }
 
+.editor-preview-panel {
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    display: grid;
+    gap: 0.75rem;
+    padding: 0.9rem;
+}
+
+.editor-preview-panel iframe {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    min-height: 26rem;
+    width: 100%;
+}
+
 .form-actions {
     display: flex;
     gap: 0.75rem;

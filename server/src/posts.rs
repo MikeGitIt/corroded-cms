@@ -1064,10 +1064,17 @@ fn post_form_html(
                 <span>Markdown</span>
                 <textarea name="body_markdown" rows="18">{}</textarea>
             </label>
+            <section class="editor-preview-panel">
+                <div class="section-heading">
+                    <h2>Preview</h2>
+                    <button type="submit" formaction="/admin/posts/preview" formtarget="markdown-preview-frame" formnovalidate>Update Preview</button>
+                </div>
+                <iframe name="markdown-preview-frame" title="Markdown preview"></iframe>
+            </section>
             {}
             <div class="form-actions">
                 <button type="submit">Save</button>
-                <button type="submit" formaction="/admin/posts/preview" formtarget="_blank" formnovalidate>Preview</button>
+                <button type="submit" formaction="/admin/posts/preview" formtarget="_blank" formnovalidate>Open Preview</button>
                 {}
             </div>
         </form>

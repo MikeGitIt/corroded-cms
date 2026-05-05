@@ -18,6 +18,10 @@ DRAFT_SLUG="${TEST_SLUG}-draft"
 DRAFT_TITLE="Smoke Draft ${TEST_SLUG}"
 TEST_TAG="Smoke Test"
 TEST_TAG_SLUG="smoke-test"
+EDIT_TAG_NAME="Editable ${TEST_SLUG}"
+EDIT_TAG_SLUG="editable-${TEST_SLUG}"
+UPDATED_EDIT_TAG_NAME="Edited ${TEST_SLUG}"
+UPDATED_EDIT_TAG_SLUG="edited-${TEST_SLUG}"
 TEST_ALT_TEXT="Smoke image ${TEST_SLUG}"
 UPDATED_ALT_TEXT="Updated smoke image ${TEST_SLUG}"
 CSRF_TOKEN=""
@@ -154,6 +158,43 @@ assert_contains "Published posts"
 assert_contains "Recent edits"
 capture_csrf_token
 
+request GET /admin/tags -b "$COOKIE_JAR" -c "$COOKIE_JAR"
+assert_status 200
+assert_contains "Tags"
+
+form_post /admin/tags \
+    --data-urlencode "csrf_token=${CSRF_TOKEN}" \
+    --data-urlencode "name=${EDIT_TAG_NAME}" \
+    --data-urlencode "slug=${EDIT_TAG_SLUG}"
+assert_status 303
+assert_location /admin/tags
+
+request GET /admin/tags -b "$COOKIE_JAR" -c "$COOKIE_JAR"
+assert_status 200
+assert_contains "$EDIT_TAG_NAME"
+assert_contains "$EDIT_TAG_SLUG"
+EDIT_TAG_PATH="$(tr '<' '\n' <"$BODY_FILE" | grep -F "$EDIT_TAG_NAME" | sed -n 's/^a href="\([^"]*\)".*/\1/p' | head -n 1)"
+[[ "$EDIT_TAG_PATH" == /admin/tags/*/edit ]] || fail "expected editable tag link, got ${EDIT_TAG_PATH}"
+EDIT_TAG_ACTION_PATH="${EDIT_TAG_PATH%/edit}"
+
+request GET "$EDIT_TAG_PATH" -b "$COOKIE_JAR" -c "$COOKIE_JAR"
+assert_status 200
+assert_contains "Edit Tag"
+assert_contains "value=\"${EDIT_TAG_NAME}\""
+
+form_post "$EDIT_TAG_ACTION_PATH" \
+    --data-urlencode "csrf_token=${CSRF_TOKEN}" \
+    --data-urlencode "name=${UPDATED_EDIT_TAG_NAME}" \
+    --data-urlencode "slug=${UPDATED_EDIT_TAG_SLUG}"
+assert_status 303
+assert_location /admin/tags
+
+request GET /admin/tags -b "$COOKIE_JAR" -c "$COOKIE_JAR"
+assert_status 200
+assert_contains "$UPDATED_EDIT_TAG_NAME"
+assert_contains "$UPDATED_EDIT_TAG_SLUG"
+assert_not_contains "$EDIT_TAG_NAME"
+
 form_post /admin/posts \
     --data-urlencode "title=Missing CSRF" \
     --data-urlencode "slug=${TEST_SLUG}-missing-csrf" \
@@ -168,6 +209,7 @@ form_post /admin/posts/preview \
     --data-urlencode "csrf_token=${CSRF_TOKEN}" \
     --data-urlencode $'body_markdown=# Preview\n\nThis is **rendered**.\n\n<script>alert(1)</script>'
 assert_status 200
+assert_header_contains content-security-policy "frame-ancestors 'self'"
 assert_contains "Markdown Preview"
 assert_contains "<strong>rendered</strong>"
 assert_not_contains "<script>"
@@ -215,6 +257,8 @@ assert_contains "![${TEST_ALT_TEXT}](${UPLOADED_PATH})"
 assert_contains "/admin.js"
 assert_contains "Advanced"
 assert_contains "name=\"scheduled_for\""
+assert_contains "name=\"markdown-preview-frame\""
+assert_contains "Update Preview"
 assert_contains "Insert"
 COVER_OPTION="$(tr '<' '\n' <"$BODY_FILE" | grep -F "$UPLOADED_PATH" | head -n 1)"
 COVER_IMAGE_ID="$(printf '%s' "$COVER_OPTION" | sed -n 's/.*value="\([0-9a-f-]\{36\}\)".*/\1/p')"
