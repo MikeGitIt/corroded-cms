@@ -29,6 +29,14 @@ restart:
     cargo leptos build
     ./scripts/dev-restart.sh
 
+restart-bg:
+    cargo leptos build
+    DETACH=1 ./scripts/dev-restart.sh
+
 restart-local:
     cargo leptos build
     ./scripts/dev-local-restart.sh
+
+restart-local-bg:
+    cargo leptos build
+    DETACH=1 ./scripts/dev-local-restart.sh

@@ -65,10 +65,22 @@ Restart the local development server after a build:
 just restart
 ```
 
+Start the rebuilt server in the background and return to the shell:
+
+```bash
+just restart-bg
+```
+
 For the common local PostgreSQL setup using your macOS/Linux username on `127.0.0.1:5432`:
 
 ```bash
 just restart-local
+```
+
+The detached local variant writes `/private/tmp/corroded-cms-3000.pid` and `/private/tmp/corroded-cms-3000.log` by default:
+
+```bash
+just restart-local-bg
 ```
 
 Override local defaults with `CORRODED_CMS_DB_USER`, `CORRODED_CMS_DATABASE_URL`, `CORRODED_CMS_PORT`, or the matching `CORRODED_CMS_*` config variable.
@@ -84,7 +96,9 @@ just migrate     # run pending database migrations
 just migrate-local # migrations with local PostgreSQL defaults
 cargo leptos build
 just restart     # rebuild, stop the local app server on PORT, and start it again
+just restart-bg  # same restart flow, but detach the server and write pid/log files
 just restart-local # same restart flow with local PostgreSQL defaults
+just restart-local-bg # detached restart with local PostgreSQL defaults
 ```
 
 DB integration tests are opt-in so the default test suite does not mutate an arbitrary local database:
