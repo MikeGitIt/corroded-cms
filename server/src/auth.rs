@@ -34,10 +34,18 @@ pub struct LoginForm {
 
 #[derive(Debug, Deserialize)]
 pub struct AccountForm {
+    #[serde(default)]
+    csrf_token: String,
     display_name: String,
     current_password: String,
     new_password: String,
     confirm_password: String,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct CsrfForm {
+    #[serde(default)]
+    pub csrf_token: String,
 }
 
 #[derive(Debug)]
@@ -106,7 +114,26 @@ pub async fn login_submit(State(state): State<AppState>, Form(form): Form<LoginF
     }
 }
 
-pub async fn logout(State(state): State<AppState>, headers: HeaderMap) -> Response {
+pub async fn logout_get(State(state): State<AppState>, headers: HeaderMap) -> Response {
+    if current_admin(&state, &headers).await.is_some() {
+        redirect("/admin")
+    } else {
+        redirect("/admin/login")
+    }
+}
+
+pub async fn logout_submit(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Form(form): Form<CsrfForm>,
+) -> Response {
+    if current_admin(&state, &headers).await.is_none() {
+        return redirect("/admin/login");
+    }
+    if !verify_csrf(&state, &headers, &form.csrf_token) {
+        return csrf_rejection();
+    }
+
     if let Some(token) = session_token(&headers) {
         let token_hash = session_hash(&state.config, token);
         if let Err(error) = sqlx::query("DELETE FROM sessions WHERE token_hash = $1")
@@ -130,14 +157,14 @@ pub async fn logout(State(state): State<AppState>, headers: HeaderMap) -> Respon
 
 pub async fn admin_dashboard(State(state): State<AppState>, headers: HeaderMap) -> Response {
     match current_admin(&state, &headers).await {
-        Some(user) => dashboard_html(&user).into_response(),
+        Some(user) => dashboard_html(&user, &csrf_input(&state, &headers)).into_response(),
         None => redirect("/admin/login"),
     }
 }
 
 pub async fn account_page(State(state): State<AppState>, headers: HeaderMap) -> Response {
     match current_admin(&state, &headers).await {
-        Some(user) => account_html(&user, None).into_response(),
+        Some(user) => account_html(&user, None, &csrf_input(&state, &headers)).into_response(),
         None => redirect("/admin/login"),
     }
 }
@@ -150,10 +177,18 @@ pub async fn account_submit(
     let Some(user) = current_admin(&state, &headers).await else {
         return redirect("/admin/login");
     };
+    if !verify_csrf(&state, &headers, &form.csrf_token) {
+        return csrf_rejection();
+    }
 
     match update_account(&state, &user, form).await {
         Ok(()) => redirect("/admin/account"),
-        Err(error) => account_html(&user, Some(&error.to_string())).into_response(),
+        Err(error) => account_html(
+            &user,
+            Some(&error.to_string()),
+            &csrf_input(&state, &headers),
+        )
+        .into_response(),
     }
 }
 
@@ -284,6 +319,28 @@ pub async fn current_admin(state: &AppState, headers: &HeaderMap) -> Option<Admi
     })
 }
 
+pub fn csrf_input(state: &AppState, headers: &HeaderMap) -> String {
+    csrf_token(state, headers)
+        .map(|token| {
+            format!(
+                r#"<input type="hidden" name="csrf_token" value="{}">"#,
+                escape_html(&token)
+            )
+        })
+        .unwrap_or_default()
+}
+
+pub fn verify_csrf(state: &AppState, headers: &HeaderMap, submitted: &str) -> bool {
+    !submitted.is_empty()
+        && csrf_token(state, headers)
+            .map(|expected| expected == submitted)
+            .unwrap_or(false)
+}
+
+pub fn csrf_rejection() -> Response {
+    (StatusCode::BAD_REQUEST, "invalid CSRF token").into_response()
+}
+
 fn hash_password(password: &str) -> Result<String> {
     let salt = SaltString::generate(&mut OsRng);
     Ok(Argon2::default()
@@ -322,6 +379,15 @@ fn session_hash(config: &AppConfig, token: &str) -> String {
     hasher.update(b":");
     hasher.update(token.as_bytes());
     format!("{:x}", hasher.finalize())
+}
+
+fn csrf_token(state: &AppState, headers: &HeaderMap) -> Option<String> {
+    let token = session_token(headers)?;
+    let mut hasher = Sha256::new();
+    hasher.update(state.config.session_secret.as_bytes());
+    hasher.update(b":csrf:");
+    hasher.update(token.as_bytes());
+    Some(format!("{:x}", hasher.finalize()))
 }
 
 fn session_token(headers: &HeaderMap) -> Option<&str> {
@@ -383,7 +449,7 @@ fn login_html(error: Option<&str>) -> Html<String> {
     Html(body)
 }
 
-fn dashboard_html(user: &AdminUser) -> Html<String> {
+fn dashboard_html(user: &AdminUser, csrf_input: &str) -> Html<String> {
     let mut body = page_start("Admin Dashboard");
     let _ = write!(
         body,
@@ -395,6 +461,7 @@ fn dashboard_html(user: &AdminUser) -> Html<String> {
                 <p>Signed in as <strong>{}</strong> ({})</p>
             </div>
             <form method="post" action="/admin/logout">
+                {}
                 <button type="submit">Sign out</button>
             </form>
         </section>
@@ -419,12 +486,13 @@ fn dashboard_html(user: &AdminUser) -> Html<String> {
         "#,
         escape_html(&user.display_name),
         escape_html(&user.email),
+        csrf_input,
     );
     body.push_str(&page_end());
     Html(body)
 }
 
-fn account_html(user: &AdminUser, error: Option<&str>) -> Html<String> {
+fn account_html(user: &AdminUser, error: Option<&str>, csrf_input: &str) -> Html<String> {
     let mut body = page_start("Account Settings");
     body.push_str(
         r#"
@@ -446,6 +514,7 @@ fn account_html(user: &AdminUser, error: Option<&str>) -> Html<String> {
         body,
         r#"
         <form method="post" action="/admin/account" class="post-form">
+            {}
             <label>
                 <span>Email</span>
                 <input value="{}" disabled>
@@ -471,6 +540,7 @@ fn account_html(user: &AdminUser, error: Option<&str>) -> Html<String> {
             </div>
         </form>
         "#,
+        csrf_input,
         escape_html(&user.email),
         escape_html(&user.display_name),
     );

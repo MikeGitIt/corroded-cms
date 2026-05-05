@@ -43,7 +43,9 @@ pub async fn admin_list(State(state): State<AppState>, headers: HeaderMap) -> Re
     }
 
     match list_assets(&state).await {
-        Ok(assets) => media_html(&assets, None).into_response(),
+        Ok(assets) => {
+            media_html(&assets, None, &auth::csrf_input(&state, &headers)).into_response()
+        }
         Err(error) => server_error(error),
     }
 }
@@ -57,12 +59,13 @@ pub async fn admin_upload(
         return redirect("/admin/login");
     };
 
-    match store_upload(&state, &user, multipart).await {
+    let csrf_input = auth::csrf_input(&state, &headers);
+    match store_upload(&state, &user, &headers, multipart).await {
         Ok(()) => redirect("/admin/media"),
         Err(error) => match list_assets(&state).await {
             Ok(assets) => (
                 StatusCode::BAD_REQUEST,
-                media_html(&assets, Some(&error.to_string())),
+                media_html(&assets, Some(&error.to_string()), &csrf_input),
             )
                 .into_response(),
             Err(_) => (StatusCode::BAD_REQUEST, error.to_string()).into_response(),
@@ -100,10 +103,12 @@ async fn list_assets(state: &AppState) -> Result<Vec<MediaAsset>> {
 async fn store_upload(
     state: &AppState,
     user: &auth::AdminUser,
+    headers: &HeaderMap,
     mut multipart: Multipart,
 ) -> Result<()> {
     let mut upload = None;
     let mut alt_text = None;
+    let mut csrf_token = None;
 
     while let Some(field) = multipart.next_field().await? {
         let Some(name) = field.name().map(str::to_owned) else {
@@ -135,8 +140,15 @@ async fn store_upload(
                 let text = field.text().await?;
                 alt_text = normalize_alt_text(&text)?;
             }
+            "csrf_token" => {
+                csrf_token = Some(field.text().await?);
+            }
             _ => {}
         }
+    }
+
+    if !auth::verify_csrf(state, headers, csrf_token.as_deref().unwrap_or("")) {
+        bail!("invalid CSRF token");
     }
 
     let Some(upload) = upload else {
@@ -250,7 +262,7 @@ fn sniff_image_kind(bytes: &[u8]) -> Option<ImageKind> {
     None
 }
 
-fn media_html(assets: &[MediaAsset], error: Option<&str>) -> Html<String> {
+fn media_html(assets: &[MediaAsset], error: Option<&str>, csrf_input: &str) -> Html<String> {
     let mut body = page_start("Media Library");
     body.push_str(
         r#"
@@ -268,9 +280,11 @@ fn media_html(assets: &[MediaAsset], error: Option<&str>) -> Html<String> {
         let _ = write!(body, r#"<p class="form-error">{}</p>"#, escape_html(error));
     }
 
-    body.push_str(
+    let _ = write!(
+        body,
         r#"
         <form method="post" action="/admin/media" enctype="multipart/form-data" class="post-form media-upload">
+            {}
             <label>
                 <span>Image</span>
                 <input name="file" type="file" accept="image/png,image/jpeg,image/gif,image/webp" required>
@@ -284,6 +298,7 @@ fn media_html(assets: &[MediaAsset], error: Option<&str>) -> Html<String> {
             </div>
         </form>
         "#,
+        csrf_input,
     );
 
     if assets.is_empty() {

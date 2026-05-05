@@ -47,6 +47,8 @@ struct PostDetail {
 
 #[derive(Debug, Deserialize)]
 pub struct PostForm {
+    #[serde(default)]
+    csrf_token: String,
     title: String,
     slug: String,
     excerpt: String,
@@ -72,7 +74,14 @@ pub async fn admin_new(State(state): State<AppState>, headers: HeaderMap) -> Res
         return redirect("/admin/login");
     }
 
-    post_form_html("New Post", "/admin/posts", None, None).into_response()
+    post_form_html(
+        "New Post",
+        "/admin/posts",
+        None,
+        None,
+        &auth::csrf_input(&state, &headers),
+    )
+    .into_response()
 }
 
 pub async fn admin_create(
@@ -83,11 +92,21 @@ pub async fn admin_create(
     let Some(user) = auth::current_admin(&state, &headers).await else {
         return redirect("/admin/login");
     };
+    let csrf_input = auth::csrf_input(&state, &headers);
+    if !auth::verify_csrf(&state, &headers, &form.csrf_token) {
+        return auth::csrf_rejection();
+    }
 
     match create_post(&state, &user, form).await {
         Ok(id) => redirect(format!("/admin/posts/{id}/edit")),
-        Err(error) => post_form_html("New Post", "/admin/posts", None, Some(&error.to_string()))
-            .into_response(),
+        Err(error) => post_form_html(
+            "New Post",
+            "/admin/posts",
+            None,
+            Some(&error.to_string()),
+            &csrf_input,
+        )
+        .into_response(),
     }
 }
 
@@ -103,7 +122,14 @@ pub async fn admin_edit(
     match get_post_for_admin(&state, id).await {
         Ok(Some(post)) => {
             let action = format!("/admin/posts/{id}");
-            post_form_html("Edit Post", &action, Some(&post), None).into_response()
+            post_form_html(
+                "Edit Post",
+                &action,
+                Some(&post),
+                None,
+                &auth::csrf_input(&state, &headers),
+            )
+            .into_response()
         }
         Ok(None) => not_found(),
         Err(error) => server_error(error),
@@ -119,6 +145,10 @@ pub async fn admin_update(
     if auth::current_admin(&state, &headers).await.is_none() {
         return redirect("/admin/login");
     }
+    let csrf_input = auth::csrf_input(&state, &headers);
+    if !auth::verify_csrf(&state, &headers, &form.csrf_token) {
+        return auth::csrf_rejection();
+    }
 
     match update_post(&state, id, form).await {
         Ok(()) => redirect(format!("/admin/posts/{id}/edit")),
@@ -130,6 +160,7 @@ pub async fn admin_update(
                     &action,
                     post.as_ref(),
                     Some(&error.to_string()),
+                    &csrf_input,
                 )
                 .into_response()
             }
@@ -142,9 +173,13 @@ pub async fn admin_archive(
     State(state): State<AppState>,
     headers: HeaderMap,
     Path(id): Path<Uuid>,
+    Form(form): Form<auth::CsrfForm>,
 ) -> Response {
     if auth::current_admin(&state, &headers).await.is_none() {
         return redirect("/admin/login");
+    }
+    if !auth::verify_csrf(&state, &headers, &form.csrf_token) {
+        return auth::csrf_rejection();
     }
 
     match set_status(&state, id, "archived").await {
@@ -605,6 +640,7 @@ fn post_form_html(
     action: &str,
     post: Option<&PostDetail>,
     error: Option<&str>,
+    csrf_input: &str,
 ) -> Html<String> {
     let mut body = page_start(title);
     let default_title = post.map(|p| p.title.as_str()).unwrap_or("");
@@ -636,6 +672,7 @@ fn post_form_html(
         body,
         r#"
         <form method="post" action="{}" class="post-form">
+            {}
             <label>
                 <span>Title</span>
                 <input name="title" value="{}" maxlength="200" required>
@@ -670,6 +707,7 @@ fn post_form_html(
         </form>
         "#,
         escape_html(action),
+        csrf_input,
         escape_html(default_title),
         escape_html(default_slug),
         escape_html(default_excerpt),
@@ -690,10 +728,11 @@ fn post_form_html(
             body,
             r#"
             <form method="post" action="/admin/posts/{}/archive" class="danger-form">
+                {}
                 <button type="submit">Archive</button>
             </form>
             "#,
-            post.id
+            post.id, csrf_input,
         );
     }
 

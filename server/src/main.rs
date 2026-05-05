@@ -102,7 +102,10 @@ async fn serve(config: AppConfig, pool: PgPool) -> Result<()> {
             "/admin/login",
             get(auth::login_page).post(auth::login_submit),
         )
-        .route("/admin/logout", get(auth::logout).post(auth::logout))
+        .route(
+            "/admin/logout",
+            get(auth::logout_get).post(auth::logout_submit),
+        )
         .route("/admin", get(auth::admin_dashboard))
         .route(
             "/admin/account",

@@ -19,6 +19,7 @@ DRAFT_TITLE="Smoke Draft ${TEST_SLUG}"
 TEST_TAG="Smoke Test"
 TEST_TAG_SLUG="smoke-test"
 TEST_ALT_TEXT="Smoke image ${TEST_SLUG}"
+CSRF_TOKEN=""
 
 fail() {
     printf 'FAIL: %s\n' "$*" >&2
@@ -82,6 +83,11 @@ form_post() {
     request POST "$path" -b "$COOKIE_JAR" -c "$COOKIE_JAR" "$@"
 }
 
+capture_csrf_token() {
+    CSRF_TOKEN="$(sed -n 's/.*name="csrf_token" value="\([^"]*\)".*/\1/p' "$BODY_FILE" | head -n 1)"
+    [[ -n "$CSRF_TOKEN" ]] || fail "could not find CSRF token"
+}
+
 write_fixture_uploads() {
     local png_b64="iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/p9sAAAAASUVORK5CYII="
     if ! printf '%s' "$png_b64" | base64 --decode >"$PNG_FILE" 2>/dev/null; then
@@ -120,17 +126,30 @@ assert_location /admin
 request GET /admin -b "$COOKIE_JAR" -c "$COOKIE_JAR"
 assert_status 200
 assert_contains "Dashboard"
+capture_csrf_token
+
+form_post /admin/posts \
+    --data-urlencode "title=Missing CSRF" \
+    --data-urlencode "slug=${TEST_SLUG}-missing-csrf" \
+    --data-urlencode "excerpt=This should fail" \
+    --data-urlencode "status=draft" \
+    --data-urlencode "tag_slugs=" \
+    --data-urlencode "body_markdown=No token"
+assert_status 400
+assert_contains "invalid CSRF token"
 
 request GET /admin/media -b "$COOKIE_JAR" -c "$COOKIE_JAR"
 assert_status 200
 assert_contains "Media"
 
 form_post /admin/media \
+    -F "csrf_token=${CSRF_TOKEN}" \
     -F "file=@${BAD_UPLOAD_FILE};filename=not-image.txt;type=text/plain"
 assert_status 400
 assert_contains "image must be a PNG, JPEG, GIF, or WebP file"
 
 form_post /admin/media \
+    -F "csrf_token=${CSRF_TOKEN}" \
     -F "file=@${PNG_FILE};filename=smoke.png;type=image/png" \
     -F "alt_text=${TEST_ALT_TEXT}"
 assert_status 303
@@ -152,6 +171,7 @@ assert_status 200
 assert_contains "Posts"
 
 form_post /admin/posts \
+    --data-urlencode "csrf_token=${CSRF_TOKEN}" \
     --data-urlencode "title=${TEST_TITLE}" \
     --data-urlencode "slug=${TEST_SLUG}" \
     --data-urlencode "excerpt=Smoke test published post" \
@@ -175,6 +195,7 @@ assert_contains "<strong>scripted</strong>"
 assert_not_contains "<script>"
 
 form_post /admin/posts \
+    --data-urlencode "csrf_token=${CSRF_TOKEN}" \
     --data-urlencode "title=${DRAFT_TITLE}" \
     --data-urlencode "slug=${DRAFT_SLUG}" \
     --data-urlencode "excerpt=Smoke test draft post" \
@@ -211,7 +232,8 @@ assert_status 404
 request GET /tags/__missing__
 assert_status 404
 
-form_post /admin/logout
+form_post /admin/logout \
+    --data-urlencode "csrf_token=${CSRF_TOKEN}"
 assert_status 303
 assert_location /admin/login
 

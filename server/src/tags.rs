@@ -27,6 +27,8 @@ pub struct Tag {
 
 #[derive(Debug, Deserialize)]
 pub struct TagForm {
+    #[serde(default)]
+    csrf_token: String,
     name: String,
     slug: String,
 }
@@ -37,7 +39,9 @@ pub async fn admin_list(State(state): State<AppState>, headers: HeaderMap) -> Re
     }
 
     match list_tags(&state).await {
-        Ok(tags) => admin_tags_html(&tags, None).into_response(),
+        Ok(tags) => {
+            admin_tags_html(&tags, None, &auth::csrf_input(&state, &headers)).into_response()
+        }
         Err(error) => server_error(error),
     }
 }
@@ -50,11 +54,17 @@ pub async fn admin_create(
     if auth::current_admin(&state, &headers).await.is_none() {
         return redirect("/admin/login");
     }
+    let csrf_input = auth::csrf_input(&state, &headers);
+    if !auth::verify_csrf(&state, &headers, &form.csrf_token) {
+        return auth::csrf_rejection();
+    }
 
     match create_tag(&state, form).await {
         Ok(()) => redirect("/admin/tags"),
         Err(error) => match list_tags(&state).await {
-            Ok(tags) => admin_tags_html(&tags, Some(&error.to_string())).into_response(),
+            Ok(tags) => {
+                admin_tags_html(&tags, Some(&error.to_string()), &csrf_input).into_response()
+            }
             Err(_) => server_error(error),
         },
     }
@@ -64,9 +74,13 @@ pub async fn admin_archive(
     State(state): State<AppState>,
     headers: HeaderMap,
     Path(id): Path<Uuid>,
+    Form(form): Form<auth::CsrfForm>,
 ) -> Response {
     if auth::current_admin(&state, &headers).await.is_none() {
         return redirect("/admin/login");
+    }
+    if !auth::verify_csrf(&state, &headers, &form.csrf_token) {
+        return auth::csrf_rejection();
     }
 
     match archive_tag(&state, id).await {
@@ -137,7 +151,7 @@ fn validate_tag_form(form: TagForm) -> Result<(String, String)> {
     Ok((name, slug))
 }
 
-fn admin_tags_html(tags: &[Tag], error: Option<&str>) -> Html<String> {
+fn admin_tags_html(tags: &[Tag], error: Option<&str>, csrf_input: &str) -> Html<String> {
     let mut body = page_start("Tags");
     body.push_str(
         r#"
@@ -155,9 +169,11 @@ fn admin_tags_html(tags: &[Tag], error: Option<&str>) -> Html<String> {
         let _ = write!(body, r#"<p class="form-error">{}</p>"#, escape_html(error));
     }
 
-    body.push_str(
+    let _ = write!(
+        body,
         r#"
         <form method="post" action="/admin/tags" class="inline-form">
+            {}
             <label>
                 <span>Name</span>
                 <input name="name" maxlength="80" required>
@@ -169,6 +185,7 @@ fn admin_tags_html(tags: &[Tag], error: Option<&str>) -> Html<String> {
             <button type="submit">Create tag</button>
         </form>
         "#,
+        csrf_input,
     );
 
     if tags.is_empty() {
@@ -181,8 +198,8 @@ fn admin_tags_html(tags: &[Tag], error: Option<&str>) -> Html<String> {
                 String::new()
             } else {
                 format!(
-                    r#"<form method="post" action="/admin/tags/{}/archive"><button type="submit">Archive</button></form>"#,
-                    tag.id
+                    r#"<form method="post" action="/admin/tags/{}/archive">{}<button type="submit">Archive</button></form>"#,
+                    tag.id, csrf_input,
                 )
             };
             let _ = write!(
