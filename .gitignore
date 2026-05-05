@@ -6,6 +6,7 @@
 /.env.*
 !/.env.example
 /uploads/
+/backups/
 
 # Logs and temporary files
 *.log

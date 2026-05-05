@@ -88,6 +88,29 @@ docker compose --profile app up --build
 
 The Compose app service binds `0.0.0.0:3000` inside the container and publishes `http://127.0.0.1:3000`. Uploaded files are stored in the `uploads-data` volume.
 
+## Backups
+
+Create a PostgreSQL custom-format dump and uploads archive:
+
+```bash
+DATABASE_URL='postgres://corroded:corroded@127.0.0.1:5432/corroded_cms' \
+UPLOAD_DIR='uploads' \
+BACKUP_DIR='backups' \
+scripts/backup.sh
+```
+
+Restore into a target database and upload directory:
+
+```bash
+DATABASE_URL='postgres://corroded:corroded@127.0.0.1:5432/corroded_cms' \
+UPLOAD_DIR='uploads' \
+DB_BACKUP='backups/corroded-cms-db-YYYYMMDDTHHMMSSZ.dump' \
+UPLOADS_BACKUP='backups/corroded-cms-uploads-YYYYMMDDTHHMMSSZ.tar.gz' \
+scripts/restore.sh
+```
+
+`scripts/restore.sh` runs `pg_restore --clean --if-exists`; point it at the intended restore database, not a production database, unless replacing that database is deliberate.
+
 ## Configuration
 
 Required environment variables are documented in `.env.example`:
