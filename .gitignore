@@ -1,5 +1,33 @@
-/target
+# Rust build output
+/target/
+
+# Local runtime/configuration
 /.env
-/uploads
+/.env.*
+!/.env.example
+/uploads/
+
+# Logs and temporary files
+*.log
+*.tmp
+*.temp
+*.swp
+*.swo
 *~
+
+# Local databases and dumps
+*.db
+*.sqlite
+*.sqlite3
+*.dump
+
+# Tooling caches
+/.cargo-tarpaulin/
+/coverage/
+/dist/
+
+# OS/editor noise
 .DS_Store
+Thumbs.db
+.idea/
+.vscode/
