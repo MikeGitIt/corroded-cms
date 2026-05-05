@@ -55,6 +55,25 @@ pub struct AdminUser {
     pub display_name: String,
 }
 
+struct DashboardData {
+    counts: DashboardCounts,
+    recent_posts: Vec<RecentPost>,
+}
+
+struct DashboardCounts {
+    published_posts: i64,
+    draft_posts: i64,
+    active_tags: i64,
+    media_assets: i64,
+}
+
+struct RecentPost {
+    id: Uuid,
+    title: String,
+    status: String,
+    updated_at: DateTime<Utc>,
+}
+
 pub async fn create_admin(
     pool: &PgPool,
     email: &str,
@@ -157,7 +176,10 @@ pub async fn logout_submit(
 
 pub async fn admin_dashboard(State(state): State<AppState>, headers: HeaderMap) -> Response {
     match current_admin(&state, &headers).await {
-        Some(user) => dashboard_html(&user, &csrf_input(&state, &headers)).into_response(),
+        Some(user) => match load_dashboard(&state).await {
+            Ok(data) => dashboard_html(&user, &data, &csrf_input(&state, &headers)).into_response(),
+            Err(error) => server_error(error),
+        },
         None => redirect("/admin/login"),
     }
 }
@@ -258,6 +280,53 @@ async fn update_account(state: &AppState, user: &AdminUser, form: AccountForm) -
     .await?;
 
     Ok(())
+}
+
+async fn load_dashboard(state: &AppState) -> Result<DashboardData> {
+    let counts = sqlx::query(
+        r#"
+        SELECT
+            (SELECT count(*) FROM posts WHERE status = 'published') AS published_posts,
+            (SELECT count(*) FROM posts WHERE status = 'draft') AS draft_posts,
+            (SELECT count(*) FROM tags WHERE archived_at IS NULL) AS active_tags,
+            (SELECT count(*) FROM media_assets) AS media_assets
+        "#,
+    )
+    .fetch_one(&state.pool)
+    .await?;
+
+    let recent_rows = sqlx::query(
+        r#"
+        SELECT id, title, status, updated_at
+        FROM posts
+        ORDER BY updated_at DESC
+        LIMIT 5
+        "#,
+    )
+    .fetch_all(&state.pool)
+    .await?;
+
+    let recent_posts = recent_rows
+        .into_iter()
+        .map(|row| {
+            Ok(RecentPost {
+                id: row.try_get("id")?,
+                title: row.try_get("title")?,
+                status: row.try_get("status")?,
+                updated_at: row.try_get("updated_at")?,
+            })
+        })
+        .collect::<Result<Vec<_>>>()?;
+
+    Ok(DashboardData {
+        counts: DashboardCounts {
+            published_posts: counts.try_get("published_posts")?,
+            draft_posts: counts.try_get("draft_posts")?,
+            active_tags: counts.try_get("active_tags")?,
+            media_assets: counts.try_get("media_assets")?,
+        },
+        recent_posts,
+    })
 }
 
 async fn create_session(
@@ -449,7 +518,7 @@ fn login_html(error: Option<&str>) -> Html<String> {
     Html(body)
 }
 
-fn dashboard_html(user: &AdminUser, csrf_input: &str) -> Html<String> {
+fn dashboard_html(user: &AdminUser, data: &DashboardData, csrf_input: &str) -> Html<String> {
     let mut body = page_start("Admin Dashboard");
     let _ = write!(
         body,
@@ -467,27 +536,62 @@ fn dashboard_html(user: &AdminUser, csrf_input: &str) -> Html<String> {
         </section>
         <section class="admin-grid">
             <article>
-                <h2><a href="/admin/posts">Posts</a></h2>
-                <p>Create, edit, publish, and archive posts.</p>
+                <p class="metric-value">{}</p>
+                <h2><a href="/admin/posts?status=published">Posts</a></h2>
+                <p>Published posts</p>
             </article>
             <article>
+                <p class="metric-value">{}</p>
+                <h2><a href="/admin/posts?status=draft">Drafts</a></h2>
+                <p>Draft posts</p>
+            </article>
+            <article>
+                <p class="metric-value">{}</p>
                 <h2><a href="/admin/tags">Tags</a></h2>
-                <p>Create and archive tags.</p>
+                <p>Active tags</p>
             </article>
             <article>
+                <p class="metric-value">{}</p>
                 <h2><a href="/admin/media">Media</a></h2>
-                <p>Upload and reuse image assets.</p>
-            </article>
-            <article>
-                <h2><a href="/admin/account">Account</a></h2>
-                <p>Update display name or password.</p>
+                <p>Uploaded assets</p>
             </article>
         </section>
         "#,
         escape_html(&user.display_name),
         escape_html(&user.email),
         csrf_input,
+        data.counts.published_posts,
+        data.counts.draft_posts,
+        data.counts.active_tags,
+        data.counts.media_assets,
     );
+
+    body.push_str(
+        r#"
+        <section class="dashboard-section">
+            <div class="section-heading">
+                <h2>Recent edits</h2>
+                <a href="/admin/account">Account</a>
+            </div>
+        "#,
+    );
+    if data.recent_posts.is_empty() {
+        body.push_str(r#"<p class="empty-state">No posts yet.</p>"#);
+    } else {
+        body.push_str(r#"<div class="table-wrap"><table class="admin-table"><thead><tr><th>Title</th><th>Status</th><th>Updated</th></tr></thead><tbody>"#);
+        for post in &data.recent_posts {
+            let _ = write!(
+                body,
+                r#"<tr><td><a href="/admin/posts/{}/edit">{}</a></td><td>{}</td><td>{}</td></tr>"#,
+                post.id,
+                escape_html(&post.title),
+                escape_html(&post.status),
+                format_date(post.updated_at),
+            );
+        }
+        body.push_str("</tbody></table></div>");
+    }
+    body.push_str("</section>");
     body.push_str(&page_end());
     Html(body)
 }
@@ -547,4 +651,17 @@ fn account_html(user: &AdminUser, error: Option<&str>, csrf_input: &str) -> Html
 
     body.push_str(&page_end());
     Html(body)
+}
+
+fn format_date(value: DateTime<Utc>) -> String {
+    value.format("%Y-%m-%d %H:%M UTC").to_string()
+}
+
+fn server_error(error: impl std::fmt::Debug) -> Response {
+    tracing::error!(?error, "admin dashboard failed");
+    (
+        StatusCode::INTERNAL_SERVER_ERROR,
+        "internal server error".to_owned(),
+    )
+        .into_response()
 }

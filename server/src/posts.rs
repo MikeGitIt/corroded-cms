@@ -3,7 +3,7 @@ use std::fmt::Write;
 use anyhow::{Result, anyhow, bail};
 use axum::{
     Form,
-    extract::{Path, State},
+    extract::{Path, Query, State},
     http::{HeaderMap, StatusCode},
     response::{Html, IntoResponse, Response},
 };
@@ -17,6 +17,8 @@ use crate::{
     AppState, auth,
     html::{escape_html, page_end, page_start, redirect},
 };
+
+const ADMIN_POST_PAGE_SIZE: i64 = 25;
 
 #[derive(Debug)]
 struct PostSummary {
@@ -58,13 +60,36 @@ pub struct PostForm {
     tag_slugs: String,
 }
 
-pub async fn admin_list(State(state): State<AppState>, headers: HeaderMap) -> Response {
+#[derive(Debug, Deserialize)]
+pub struct PostListParams {
+    status: Option<String>,
+    q: Option<String>,
+    page: Option<u32>,
+}
+
+#[derive(Debug)]
+struct PostListFilters {
+    status: Option<String>,
+    q: Option<String>,
+    page: u32,
+}
+
+pub async fn admin_list(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Query(params): Query<PostListParams>,
+) -> Response {
     if auth::current_admin(&state, &headers).await.is_none() {
         return redirect("/admin/login");
     }
 
-    match list_admin_posts(&state).await {
-        Ok(posts) => admin_list_html(&posts).into_response(),
+    let filters = match normalize_post_list_params(params) {
+        Ok(filters) => filters,
+        Err(error) => return (StatusCode::BAD_REQUEST, error.to_string()).into_response(),
+    };
+
+    match list_admin_posts(&state, &filters).await {
+        Ok(posts) => admin_list_html(&posts, &filters).into_response(),
         Err(error) => server_error(error),
     }
 }
@@ -213,7 +238,8 @@ pub async fn tag_detail(State(state): State<AppState>, Path(slug): Path<String>)
     }
 }
 
-async fn list_admin_posts(state: &AppState) -> Result<Vec<PostSummary>> {
+async fn list_admin_posts(state: &AppState, filters: &PostListFilters) -> Result<Vec<PostSummary>> {
+    let offset = (filters.page.saturating_sub(1) as i64) * ADMIN_POST_PAGE_SIZE;
     let rows = sqlx::query(
         r#"
         SELECT posts.id,
@@ -228,15 +254,47 @@ async fn list_admin_posts(state: &AppState) -> Result<Vec<PostSummary>> {
         FROM posts
         LEFT JOIN post_tags ON post_tags.post_id = posts.id
         LEFT JOIN tags ON tags.id = post_tags.tag_id
+        WHERE ($1::text IS NULL OR posts.status = $1)
+          AND (
+              $2::text IS NULL
+              OR posts.title ILIKE '%' || $2 || '%'
+              OR posts.slug ILIKE '%' || $2 || '%'
+              OR posts.excerpt ILIKE '%' || $2 || '%'
+          )
         GROUP BY posts.id
-        ORDER BY updated_at DESC
-        LIMIT 25
+        ORDER BY posts.updated_at DESC
+        LIMIT $3 OFFSET $4
         "#,
     )
+    .bind(filters.status.as_deref())
+    .bind(filters.q.as_deref())
+    .bind(ADMIN_POST_PAGE_SIZE)
+    .bind(offset)
     .fetch_all(&state.pool)
     .await?;
 
     rows.into_iter().map(post_summary_from_row).collect()
+}
+
+fn normalize_post_list_params(params: PostListParams) -> Result<PostListFilters> {
+    let status = match params.status.as_deref().map(str::trim) {
+        Some("") | None | Some("all") => None,
+        Some(status @ ("draft" | "published" | "archived")) => Some(status.to_owned()),
+        Some(_) => bail!("post status filter is invalid"),
+    };
+
+    let q = params
+        .q
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(str::to_owned);
+    if q.as_deref().map(str::len).unwrap_or(0) > 100 {
+        bail!("search query must be 100 characters or fewer");
+    }
+
+    let page = params.page.unwrap_or(1).clamp(1, 1000);
+    Ok(PostListFilters { status, q, page })
 }
 
 async fn list_public_posts(state: &AppState) -> Result<Vec<PostSummary>> {
@@ -593,7 +651,7 @@ fn post_detail_from_row(row: sqlx::postgres::PgRow) -> Result<PostDetail> {
     })
 }
 
-fn admin_list_html(posts: &[PostSummary]) -> Html<String> {
+fn admin_list_html(posts: &[PostSummary], filters: &PostListFilters) -> Html<String> {
     let mut body = page_start("Posts");
     body.push_str(
         r#"
@@ -605,6 +663,35 @@ fn admin_list_html(posts: &[PostSummary]) -> Html<String> {
             <a class="button-link" href="/admin/posts/new">New post</a>
         </section>
         "#,
+    );
+
+    let selected_status = filters.status.as_deref().unwrap_or("all");
+    let _ = write!(
+        body,
+        r#"
+        <form method="get" action="/admin/posts" class="admin-filters">
+            <label>
+                <span>Status</span>
+                <select name="status">
+                    {}
+                    {}
+                    {}
+                    {}
+                </select>
+            </label>
+            <label>
+                <span>Search</span>
+                <input name="q" value="{}" maxlength="100" placeholder="Title, slug, or excerpt">
+            </label>
+            <button type="submit">Filter</button>
+            <a href="/admin/posts">Clear</a>
+        </form>
+        "#,
+        selected_option("all", "All", selected_status),
+        selected_option("draft", "Draft", selected_status),
+        selected_option("published", "Published", selected_status),
+        selected_option("archived", "Archived", selected_status),
+        escape_html(filters.q.as_deref().unwrap_or("")),
     );
 
     if posts.is_empty() {

@@ -134,6 +134,8 @@ assert_location /admin
 request GET /admin -b "$COOKIE_JAR" -c "$COOKIE_JAR"
 assert_status 200
 assert_contains "Dashboard"
+assert_contains "Published posts"
+assert_contains "Recent edits"
 capture_csrf_token
 
 form_post /admin/posts \
@@ -193,6 +195,10 @@ request GET /admin/posts -b "$COOKIE_JAR" -c "$COOKIE_JAR"
 assert_status 200
 assert_contains "$TEST_TITLE"
 
+request GET "/admin/posts?status=published&q=${TEST_SLUG}" -b "$COOKIE_JAR" -c "$COOKIE_JAR"
+assert_status 200
+assert_contains "$TEST_TITLE"
+
 request GET /blog
 assert_status 200
 assert_header_contains content-security-policy "default-src 'self'"
@@ -216,6 +222,14 @@ form_post /admin/posts \
     --data-urlencode "tag_slugs=" \
     --data-urlencode "body_markdown=Draft content"
 assert_status 303
+
+request GET "/admin/posts?status=draft&q=${DRAFT_SLUG}" -b "$COOKIE_JAR" -c "$COOKIE_JAR"
+assert_status 200
+assert_contains "$DRAFT_TITLE"
+
+request GET "/admin/posts?status=published&q=${DRAFT_SLUG}" -b "$COOKIE_JAR" -c "$COOKIE_JAR"
+assert_status 200
+assert_not_contains "$DRAFT_TITLE"
 
 request GET "/blog/${DRAFT_SLUG}"
 assert_status 404

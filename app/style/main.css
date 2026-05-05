@@ -218,6 +218,62 @@ button:focus {
     margin: 0.55rem 0 0;
 }
 
+.metric-value {
+    color: var(--accent-strong) !important;
+    font-size: 2rem;
+    font-weight: 800;
+    line-height: 1;
+    margin: 0 0 0.75rem !important;
+}
+
+.dashboard-section {
+    margin-top: 2rem;
+}
+
+.section-heading {
+    align-items: center;
+    display: flex;
+    gap: 1rem;
+    justify-content: space-between;
+}
+
+.section-heading h2 {
+    font-size: 1.15rem;
+    margin: 0;
+}
+
+.admin-filters {
+    align-items: end;
+    display: grid;
+    gap: 0.75rem;
+    grid-template-columns: minmax(140px, 180px) minmax(220px, 1fr) auto auto;
+    margin-top: 1.5rem;
+}
+
+.admin-filters label {
+    display: grid;
+    gap: 0.4rem;
+}
+
+.admin-filters span {
+    color: var(--muted);
+    font-size: 0.85rem;
+    font-weight: 700;
+}
+
+.admin-filters input,
+.admin-filters select {
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    color: var(--text);
+    font: inherit;
+    padding: 0.75rem 0.85rem;
+}
+
+.admin-filters a {
+    padding: 0.75rem 0;
+}
+
 .empty-state {
     color: var(--muted);
     font-size: 1rem;
@@ -449,6 +505,11 @@ button:focus {
     }
 
     .admin-grid {
+        grid-template-columns: 1fr;
+    }
+
+    .admin-filters {
+        align-items: stretch;
         grid-template-columns: 1fr;
     }
 }
