@@ -18,3 +18,7 @@ dev:
 restart:
     cargo leptos build
     ./scripts/dev-restart.sh
+
+restart-local:
+    cargo leptos build
+    ./scripts/dev-local-restart.sh

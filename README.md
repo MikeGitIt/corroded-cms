@@ -53,6 +53,14 @@ Restart the local development server after a build:
 just restart
 ```
 
+For the common local PostgreSQL setup using your macOS/Linux username on `127.0.0.1:5432`:
+
+```bash
+just restart-local
+```
+
+Override local defaults with `CORRODED_CMS_DB_USER`, `CORRODED_CMS_DATABASE_URL`, `CORRODED_CMS_PORT`, or the matching `CORRODED_CMS_*` config variable.
+
 ## Common Commands
 
 ```bash
@@ -61,6 +69,7 @@ just test        # cargo test --workspace
 just smoke       # endpoint smoke test against a running local server
 cargo leptos build
 just restart     # rebuild, stop the local app server on PORT, and start it again
+just restart-local # same restart flow with local PostgreSQL defaults
 ```
 
 ## Configuration
