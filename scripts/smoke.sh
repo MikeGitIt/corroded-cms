@@ -277,6 +277,7 @@ request GET /blog
 assert_status 200
 assert_header_contains content-security-policy "default-src 'self'"
 assert_header_contains x-content-type-options "nosniff"
+assert_header_contains x-request-id "-"
 assert_header_contains referrer-policy "strict-origin-when-cross-origin"
 assert_header_contains permissions-policy "geolocation=()"
 assert_contains "$TEST_TITLE"
@@ -392,9 +393,11 @@ assert_contains "/tags/${TEST_TAG_SLUG}"
 # These negative checks are expected 404s: drafts and missing resources must not publish.
 request GET /blog/__missing__
 assert_status 404
+assert_contains "Page Not Found"
 
 request GET /tags/__missing__
 assert_status 404
+assert_contains "Page Not Found"
 
 form_post /admin/logout \
     --data-urlencode "csrf_token=${CSRF_TOKEN}"

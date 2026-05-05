@@ -6,7 +6,10 @@ use axum::{
 use chrono::{DateTime, Utc};
 use sqlx::Row;
 
-use crate::{AppState, html::redirect};
+use crate::{
+    AppState,
+    html::{redirect, server_error_page},
+};
 
 struct FeedPost {
     title: String,
@@ -185,9 +188,5 @@ fn xml_escape(value: &str) -> String {
 
 fn server_error(error: impl std::fmt::Debug) -> Response {
     tracing::error!(?error, "request failed");
-    (
-        StatusCode::INTERNAL_SERVER_ERROR,
-        "Something went wrong".to_owned(),
-    )
-        .into_response()
+    server_error_page()
 }

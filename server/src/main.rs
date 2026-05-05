@@ -7,7 +7,7 @@ mod media;
 mod posts;
 mod tags;
 
-use std::sync::Arc;
+use std::{sync::Arc, time::Instant};
 
 use anyhow::{Context, Result};
 use app::app::shell;
@@ -30,6 +30,7 @@ use leptos::prelude::*;
 use sqlx::{PgPool, postgres::PgPoolOptions};
 use tower_http::{services::ServeDir, trace::TraceLayer};
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
+use uuid::Uuid;
 
 #[derive(Clone)]
 pub struct AppState {
@@ -193,10 +194,19 @@ async fn healthz(State(state): State<AppState>) -> Response {
 
 async fn response_headers(request: Request<Body>, next: Next) -> Response {
     let is_upload = request.uri().path().starts_with("/uploads/");
+    let method = request.method().clone();
+    let path = request.uri().path().to_owned();
+    let request_id = request_id(&request);
+    let started = Instant::now();
     let mut response = next.run(request).await;
+    let status = response.status();
+    let duration_ms = started.elapsed().as_millis();
     let should_cache_upload = is_upload && response.status().is_success();
     let headers = response.headers_mut();
 
+    if let Ok(value) = HeaderValue::from_str(&request_id) {
+        headers.insert(HeaderName::from_static("x-request-id"), value);
+    }
     headers.insert(
         CONTENT_SECURITY_POLICY,
         HeaderValue::from_static(
@@ -220,7 +230,27 @@ async fn response_headers(request: Request<Body>, next: Next) -> Response {
         );
     }
 
+    tracing::info!(
+        request_id = %request_id,
+        method = %method,
+        path = %path,
+        status = status.as_u16(),
+        duration_ms,
+        "request completed"
+    );
+
     response
+}
+
+fn request_id(request: &Request<Body>) -> String {
+    request
+        .headers()
+        .get("x-request-id")
+        .and_then(|value| value.to_str().ok())
+        .map(str::trim)
+        .filter(|value| !value.is_empty() && value.len() <= 128)
+        .map(str::to_owned)
+        .unwrap_or_else(|| Uuid::new_v4().to_string())
 }
 
 fn init_tracing() {

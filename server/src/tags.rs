@@ -4,7 +4,7 @@ use anyhow::{Result, anyhow, bail};
 use axum::{
     Form,
     extract::{Path, State},
-    http::{HeaderMap, StatusCode},
+    http::HeaderMap,
     response::{Html, IntoResponse, Response},
 };
 use serde::Deserialize;
@@ -14,7 +14,7 @@ use uuid::Uuid;
 
 use crate::{
     AppState, auth,
-    html::{escape_html, page_end, page_start, redirect},
+    html::{escape_html, page_end, page_start, redirect, server_error_page},
 };
 
 #[derive(Debug)]
@@ -220,9 +220,5 @@ fn admin_tags_html(tags: &[Tag], error: Option<&str>, csrf_input: &str) -> Html<
 
 fn server_error(error: impl std::fmt::Debug) -> Response {
     tracing::error!(?error, "request failed");
-    (
-        StatusCode::INTERNAL_SERVER_ERROR,
-        Html("Something went wrong".to_owned()),
-    )
-        .into_response()
+    server_error_page()
 }

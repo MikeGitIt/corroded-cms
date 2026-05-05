@@ -15,7 +15,7 @@ use uuid::Uuid;
 
 use crate::{
     AppState, auth,
-    html::{escape_html, page_end, page_start, redirect},
+    html::{escape_html, not_found_page, page_end, page_start, redirect, server_error_page},
 };
 
 const ADMIN_POST_PAGE_SIZE: i64 = 25;
@@ -1565,14 +1565,10 @@ fn format_date(value: DateTime<Utc>) -> String {
 }
 
 fn not_found() -> Response {
-    (StatusCode::NOT_FOUND, Html("Not found".to_owned())).into_response()
+    not_found_page()
 }
 
 fn server_error(error: impl std::fmt::Debug) -> Response {
     tracing::error!(?error, "request failed");
-    (
-        StatusCode::INTERNAL_SERVER_ERROR,
-        Html("Something went wrong".to_owned()),
-    )
-        .into_response()
+    server_error_page()
 }

@@ -24,7 +24,7 @@ use sha2::{Digest, Sha256};
 use sqlx::{PgPool, Row};
 use uuid::Uuid;
 
-use crate::html::{escape_html, page_end, page_start, redirect};
+use crate::html::{escape_html, page_end, page_start, redirect, server_error_page};
 use crate::{AppState, config::AppConfig};
 
 const SESSION_COOKIE: &str = "corroded_session";
@@ -782,11 +782,7 @@ fn format_date(value: DateTime<Utc>) -> String {
 
 fn server_error(error: impl std::fmt::Debug) -> Response {
     tracing::error!(?error, "admin dashboard failed");
-    (
-        StatusCode::INTERNAL_SERVER_ERROR,
-        "internal server error".to_owned(),
-    )
-        .into_response()
+    server_error_page()
 }
 
 #[cfg(test)]

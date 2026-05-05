@@ -14,7 +14,7 @@ use uuid::Uuid;
 
 use crate::{
     AppState, auth,
-    html::{escape_html, page_end, page_start, redirect},
+    html::{escape_html, page_end, page_start, redirect, server_error_page},
 };
 
 #[derive(Debug)]
@@ -589,11 +589,7 @@ fn markdown_alt_text(value: &str) -> String {
 
 fn server_error(error: anyhow::Error) -> Response {
     tracing::error!(?error, "media handler failed");
-    (
-        StatusCode::INTERNAL_SERVER_ERROR,
-        "internal server error".to_owned(),
-    )
-        .into_response()
+    server_error_page()
 }
 
 #[cfg(test)]
