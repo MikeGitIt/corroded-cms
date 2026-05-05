@@ -56,6 +56,8 @@ async fn main() -> Result<()> {
         environment = ?config.environment,
         site_name = %config.site_name,
         site_description = %config.site_description,
+        host = %config.host,
+        port = config.port,
         max_upload_bytes = config.max_upload_bytes,
         session_secret_bytes = config.session_secret.len(),
         upload_dir = ?config.upload_dir,
@@ -84,8 +86,11 @@ async fn serve(config: AppConfig, pool: PgPool) -> Result<()> {
         .with_context(|| format!("failed to create upload directory {:?}", config.upload_dir))?;
 
     let conf = get_configuration(None).context("failed to read Leptos configuration")?;
-    let leptos_options = conf.leptos_options;
-    let addr = leptos_options.site_addr;
+    let mut leptos_options = conf.leptos_options;
+    let addr = format!("{}:{}", config.host, config.port)
+        .parse()
+        .with_context(|| format!("failed to parse bind address {}:{}", config.host, config.port))?;
+    leptos_options.site_addr = addr;
 
     let state = AppState {
         pool,

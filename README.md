@@ -72,6 +72,22 @@ just restart     # rebuild, stop the local app server on PORT, and start it agai
 just restart-local # same restart flow with local PostgreSQL defaults
 ```
 
+## Docker
+
+Build the production image:
+
+```bash
+docker build -t corroded-cms .
+```
+
+Run the app with PostgreSQL through Compose:
+
+```bash
+docker compose --profile app up --build
+```
+
+The Compose app service binds `0.0.0.0:3000` inside the container and publishes `http://127.0.0.1:3000`. Uploaded files are stored in the `uploads-data` volume.
+
 ## Configuration
 
 Required environment variables are documented in `.env.example`:

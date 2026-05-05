@@ -33,6 +33,8 @@ pub struct AppConfig {
     pub environment: Environment,
     pub site_name: String,
     pub site_description: String,
+    pub host: String,
+    pub port: u16,
     pub max_upload_bytes: u64,
 }
 
@@ -54,6 +56,8 @@ impl AppConfig {
             environment,
             site_name: required("SITE_NAME")?,
             site_description: required("SITE_DESCRIPTION")?,
+            host: optional_string("HOST", "127.0.0.1")?,
+            port: optional_u16("PORT", 3000)?,
             max_upload_bytes: optional_u64("MAX_UPLOAD_BYTES", 5 * 1024 * 1024)?,
         })
     }
@@ -74,5 +78,21 @@ fn optional_u64(name: &str, default: u64) -> Result<u64> {
             .parse::<u64>()
             .with_context(|| format!("{name} must be an unsigned integer")),
         _ => Ok(default),
+    }
+}
+
+fn optional_u16(name: &str, default: u16) -> Result<u16> {
+    match env::var(name) {
+        Ok(value) if !value.trim().is_empty() => value
+            .parse::<u16>()
+            .with_context(|| format!("{name} must be a TCP port number")),
+        _ => Ok(default),
+    }
+}
+
+fn optional_string(name: &str, default: &str) -> Result<String> {
+    match env::var(name) {
+        Ok(value) if !value.trim().is_empty() => Ok(value.trim().to_owned()),
+        _ => Ok(default.to_owned()),
     }
 }

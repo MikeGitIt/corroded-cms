@@ -1,4 +1,27 @@
 services:
+  app:
+    build: .
+    profiles: ["app"]
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: postgres://corroded:corroded@postgres:5432/corroded_cms
+      BASE_URL: http://127.0.0.1:3000
+      SESSION_SECRET: dev-only-change-me-to-at-least-32-bytes
+      UPLOAD_DIR: /app/uploads
+      ENVIRONMENT: development
+      SITE_NAME: Corroded CMS
+      SITE_DESCRIPTION: A Rust-native blog CMS.
+      RUST_LOG: corroded_cms=info,tower_http=info
+      HOST: 0.0.0.0
+      PORT: "3000"
+      MAX_UPLOAD_BYTES: "5242880"
+    ports:
+      - "3000:3000"
+    volumes:
+      - uploads-data:/app/uploads
+
   postgres:
     image: postgres:17-alpine
     environment:
@@ -17,3 +40,4 @@ services:
 
 volumes:
   postgres-data:
+  uploads-data:
