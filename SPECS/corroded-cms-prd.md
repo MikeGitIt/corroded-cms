@@ -1287,6 +1287,455 @@ CMS-1408 — CMS-managed pages and navigation
 * Navigation manager for primary/footer links with ordering, labels, internal page targets, and custom URLs.
 * Theme plugins should render stored navigation and use plugin defaults only as fallback.
 
+Post-MVP implementation detail: pages, navigation, and editable themes
+
+The next coherent step after the MVP and initial theme plugin work is not more hard-coded theme content. It is CMS-managed site structure:
+
+1. Add first-class pages.
+2. Add navigation management.
+3. Make theme plugins render stored pages/navigation/settings.
+4. Add editable theme instances using a Rust runtime template engine.
+
+This keeps the system aligned with a real CMS: authors edit content and navigation in the admin UI, while theme developers can still ship robust Rust-backed default themes.
+
+CMS-managed pages
+
+Pages are distinct from posts:
+
+* Posts are chronological content and live under `/blog/{slug}`.
+* Pages are durable site content and should be routable at stable paths such as `/about`, `/contact`, `/product`, or nested paths such as `/company/security`.
+
+Suggested schema:
+
+```sql
+CREATE TABLE pages (
+    id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+    title text NOT NULL CHECK (char_length(title) <= 200),
+    slug text NOT NULL CHECK (char_length(slug) <= 200),
+    path text NOT NULL UNIQUE CHECK (char_length(path) <= 300),
+    excerpt text NOT NULL DEFAULT '' CHECK (char_length(excerpt) <= 500),
+    body_markdown text NOT NULL DEFAULT '' CHECK (octet_length(body_markdown) <= 1048576),
+    body_html text NOT NULL DEFAULT '',
+    status text NOT NULL DEFAULT 'draft' CHECK (status IN ('draft', 'published', 'archived')),
+    template_key text NOT NULL DEFAULT 'page' CHECK (char_length(template_key) <= 100),
+    meta_title text CHECK (meta_title IS NULL OR char_length(meta_title) <= 200),
+    meta_description text CHECK (meta_description IS NULL OR char_length(meta_description) <= 300),
+    canonical_url text CHECK (canonical_url IS NULL OR char_length(canonical_url) <= 500),
+    published_at timestamptz,
+    created_at timestamptz NOT NULL DEFAULT now(),
+    updated_at timestamptz NOT NULL DEFAULT now()
+);
+```
+
+Recommended indexes:
+
+```sql
+CREATE UNIQUE INDEX pages_public_path_idx ON pages (path)
+WHERE status = 'published' AND published_at IS NOT NULL;
+
+CREATE INDEX pages_updated_idx ON pages (updated_at DESC);
+```
+
+Admin requirements:
+
+* `/admin/pages` lists pages with status, path, template, publish date, and updated date.
+* `/admin/pages/new` creates a draft page.
+* `/admin/pages/{id}/edit` edits page content and metadata.
+* Page editor should support the existing Markdown workflow with preview.
+* If rich text is added later, store canonical Markdown or sanitized HTML, not arbitrary unsanitized browser HTML.
+* Page paths must be normalized to start with `/`, reject duplicate slashes, reject `..`, and reject trailing slash except `/`.
+* Page paths must be checked against reserved system paths.
+
+Reserved paths:
+
+* `/admin`
+* `/admin/*`
+* `/blog`
+* `/blog/*`
+* `/tags`
+* `/tags/*`
+* `/uploads`
+* `/uploads/*`
+* `/feed.xml`
+* `/rss.xml`
+* `/sitemap.xml`
+* `/healthz`
+* `/pkg`
+* `/pkg/*`
+* `/themes`
+* `/themes/*`
+
+Public routing order:
+
+1. Match explicit system routes first.
+2. Match blog, tag, feed, sitemap, admin, uploads, and static assets.
+3. Fall back to published page lookup by normalized request path.
+4. Return 404 only if no system route or page route matches.
+
+Navigation management
+
+Navigation should be CMS data, not hard-coded theme arrays.
+
+Suggested schema:
+
+```sql
+CREATE TABLE navigation_menus (
+    id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+    key text NOT NULL UNIQUE CHECK (char_length(key) <= 80),
+    label text NOT NULL CHECK (char_length(label) <= 120),
+    created_at timestamptz NOT NULL DEFAULT now(),
+    updated_at timestamptz NOT NULL DEFAULT now()
+);
+
+CREATE TABLE navigation_items (
+    id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+    menu_id uuid NOT NULL REFERENCES navigation_menus(id) ON DELETE CASCADE,
+    parent_id uuid REFERENCES navigation_items(id) ON DELETE CASCADE,
+    label text NOT NULL CHECK (char_length(label) <= 120),
+    url text CHECK (url IS NULL OR char_length(url) <= 500),
+    page_id uuid REFERENCES pages(id) ON DELETE SET NULL,
+    position integer NOT NULL DEFAULT 0,
+    open_in_new_tab boolean NOT NULL DEFAULT false,
+    archived_at timestamptz,
+    created_at timestamptz NOT NULL DEFAULT now(),
+    updated_at timestamptz NOT NULL DEFAULT now(),
+    CHECK (
+        (page_id IS NOT NULL AND url IS NULL)
+        OR (page_id IS NULL AND url IS NOT NULL)
+    )
+);
+```
+
+Admin requirements:
+
+* `/admin/navigation` lists menus.
+* Each menu supports ordered items.
+* Items can link to an internal page or a custom URL.
+* Internal page links should use the current page path at render time so path edits do not strand old navigation rows.
+* Archived pages should be clearly flagged in navigation editing.
+* The primary menu and footer menu should be seeded from the active theme defaults on first install.
+* Theme defaults are fallback only; once a menu exists in the database, stored menu data wins.
+
+Rendering requirements:
+
+* Public render context must include `navigation.primary` and `navigation.footer`.
+* Theme plugins should render stored navigation through common helpers rather than static arrays.
+* If stored navigation is empty, the active theme may expose fallback nav items.
+
+Hybrid theme architecture
+
+Corroded CMS should use a hybrid theme model:
+
+1. Rust theme plugins for trusted built-in themes and package metadata.
+2. Runtime template themes for admin-editable theme markup, CSS, and settings.
+
+Rust plugins are compiled. They are suitable for shipping defaults, schemas, helper registrations, migrations, and packaged assets. They are not suitable for in-browser template CRUD because changing Rust code requires rebuilding the binary.
+
+Editable themes should be represented as data:
+
+* theme records
+* template records
+* setting records
+* asset records
+* generated CSS or editable CSS
+* page and navigation data rendered through the active theme
+
+Use an existing Rust runtime template engine rather than inventing a template language.
+
+Preferred engine:
+
+* MiniJinja.
+
+Why MiniJinja is a good fit:
+
+* It is Rust-native.
+* It supports runtime-loaded templates from strings or files.
+* It accepts `serde` context values.
+* It supports inheritance, includes, blocks, filters, and functions.
+* It has safety controls such as fuel that can help prevent expensive templates.
+* Its syntax is familiar enough for theme authors and has existing editor support.
+
+Acceptable alternatives:
+
+* Tera for a Jinja/Django-style Rust runtime engine.
+* Liquid if a more constrained designer-facing language is preferred.
+* Handlebars if simple substitution and helpers are enough.
+
+Do not use Askama for editable themes. Askama is compile-time and type-safe, which is useful for built-in server/admin templates, but it does not satisfy browser-editable theme requirements.
+
+Theme records
+
+Suggested schema:
+
+```sql
+CREATE TABLE themes (
+    id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+    key text NOT NULL UNIQUE CHECK (char_length(key) <= 100),
+    display_name text NOT NULL CHECK (char_length(display_name) <= 160),
+    source text NOT NULL CHECK (source IN ('builtin', 'editable', 'package')),
+    version text CHECK (version IS NULL OR char_length(version) <= 80),
+    description text NOT NULL DEFAULT '' CHECK (char_length(description) <= 1000),
+    preview_image_path text CHECK (preview_image_path IS NULL OR char_length(preview_image_path) <= 500),
+    archived_at timestamptz,
+    created_at timestamptz NOT NULL DEFAULT now(),
+    updated_at timestamptz NOT NULL DEFAULT now()
+);
+
+CREATE TABLE theme_templates (
+    id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+    theme_id uuid NOT NULL REFERENCES themes(id) ON DELETE CASCADE,
+    key text NOT NULL CHECK (char_length(key) <= 120),
+    source text NOT NULL CHECK (octet_length(source) <= 1048576),
+    content_type text NOT NULL DEFAULT 'text/html' CHECK (char_length(content_type) <= 120),
+    updated_at timestamptz NOT NULL DEFAULT now(),
+    UNIQUE (theme_id, key)
+);
+
+CREATE TABLE theme_settings (
+    theme_id uuid NOT NULL REFERENCES themes(id) ON DELETE CASCADE,
+    key text NOT NULL CHECK (char_length(key) <= 120),
+    value_json jsonb NOT NULL DEFAULT 'null'::jsonb,
+    updated_at timestamptz NOT NULL DEFAULT now(),
+    PRIMARY KEY (theme_id, key)
+);
+
+CREATE TABLE theme_assets (
+    id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+    theme_id uuid NOT NULL REFERENCES themes(id) ON DELETE CASCADE,
+    path text NOT NULL CHECK (char_length(path) <= 500),
+    media_asset_id uuid REFERENCES media_assets(id) ON DELETE SET NULL,
+    content_type text NOT NULL CHECK (char_length(content_type) <= 120),
+    archived_at timestamptz,
+    created_at timestamptz NOT NULL DEFAULT now(),
+    updated_at timestamptz NOT NULL DEFAULT now(),
+    UNIQUE (theme_id, path)
+);
+```
+
+Active theme setting:
+
+* Continue storing active theme selection in `site_settings` as `theme.active`.
+* `theme.active` should reference `themes.key` or a registered built-in plugin key.
+* The active theme cannot be archived.
+* If the active theme is missing or archived, the server must fall back to the configured default and log an error.
+
+Theme template keys
+
+A theme should provide these template keys at minimum:
+
+* `base.html`
+* `home.html`
+* `page.html`
+* `blog_index.html`
+* `post_detail.html`
+* `tag_index.html`
+* `error.html`
+* `partials/nav.html`
+* `partials/footer.html`
+
+Template validation:
+
+* Saving a template must parse/compile it before persistence.
+* The admin UI must show template errors with line and column if available.
+* Activation must validate that all required template keys exist.
+* Missing optional templates should fall back to theme defaults or `base.html`.
+* Template includes must be restricted to the active theme namespace and approved partials.
+* Template source size must be capped.
+* Rendering must use autoescaping for HTML templates.
+
+Render context contract
+
+All runtime themes should receive a stable serializable context. Example shape:
+
+```json
+{
+  "site": {
+    "name": "GigaTier Technologies",
+    "description": "Autonomous C/C++ to Rust transpilation.",
+    "base_url": "http://127.0.0.1:3000"
+  },
+  "request": {
+    "path": "/about"
+  },
+  "theme": {
+    "key": "gigatier",
+    "settings": {}
+  },
+  "navigation": {
+    "primary": [],
+    "footer": []
+  },
+  "page": {},
+  "post": {},
+  "posts": [],
+  "tags": []
+}
+```
+
+Rules:
+
+* Do not expose secrets, session data, CSRF tokens, database URLs, upload directory paths, or admin-only fields to public templates.
+* Public templates should receive only sanitized public content.
+* Markdown-generated HTML should be sanitized before it enters the render context.
+* User-authored raw HTML, if supported, must be sanitized with an allowlist.
+* Theme helper functions must be explicitly registered. Do not expose arbitrary file, network, process, or environment access.
+
+Theme CRUD semantics
+
+Create:
+
+* Built-in themes are created by registering Rust plugins and seeding a `themes` record.
+* Editable themes can be created from a blank starter, from a built-in theme copy, or from an imported package.
+* Creating from a built-in theme should copy editable templates/settings into database records while preserving the original built-in package.
+* New themes start inactive until validation passes.
+
+Read:
+
+* `/admin/themes` lists installed themes, active status, source type, version, archive status, and validation status.
+* Detail view shows templates, settings, assets, navigation defaults, preview image, and required template coverage.
+* Admins can preview a theme against existing pages/posts without activating it.
+
+Update:
+
+* Editable themes can update templates, settings, CSS, and assets.
+* Built-in themes can expose editable settings, but built-in template source should remain read-only unless copied into an editable child theme.
+* Template saves must invalidate the compiled template cache for that theme.
+* CSS edits should be saved as theme assets or a dedicated `theme_templates` row with `content_type = 'text/css'`.
+* Theme settings should be generated from a plugin-provided schema where possible.
+
+Delete/archive:
+
+* Use `archived_at`; do not hard-delete by default.
+* Active theme cannot be archived.
+* Archived themes cannot be activated.
+* Existing pages and navigation must keep rendering with the active fallback if their prior theme is archived.
+* Permanent deletion can be a later admin-only maintenance operation after reference checks.
+
+Theme package format
+
+A package import format should be added before supporting arbitrary uploads. Suggested layout:
+
+```text
+theme.toml
+templates/
+  base.html
+  home.html
+  page.html
+  blog_index.html
+  post_detail.html
+  tag_index.html
+  error.html
+  partials/nav.html
+  partials/footer.html
+assets/
+  style.css
+  logo.svg
+  preview.png
+settings.schema.json
+```
+
+`theme.toml` should include:
+
+```toml
+key = "gigatier"
+display_name = "GigaTier"
+version = "1.0.0"
+engine = "minijinja"
+description = "GigaTier public site theme."
+```
+
+Package import requirements:
+
+* Reject path traversal and absolute paths.
+* Reject executable files.
+* Cap total package size and per-file size.
+* Validate manifest before importing assets/templates.
+* Parse all templates before marking import successful.
+* Store imported package files as database rows or copy them into a controlled theme asset directory.
+
+Admin editor requirements
+
+Pages:
+
+* Markdown editor with preview, using the same sanitation path as posts.
+* SEO fields.
+* Template selector limited to templates supported by the active theme.
+* Publish/draft/archive workflow.
+
+Navigation:
+
+* Menu selector for primary/footer.
+* Ordered link list.
+* Link target can be internal page or custom URL.
+* Validation prevents empty labels, invalid URLs, and archived page targets unless explicitly allowed.
+
+Themes:
+
+* Installed themes list.
+* Active theme selector.
+* Editable theme create/copy/archive actions.
+* Template editor for runtime templates.
+* Theme settings form generated from schema.
+* Asset manager scoped to the theme.
+* Preview action that renders a selected page/post using the candidate theme without changing `theme.active`.
+
+The template editor is not a WYSIWYG page editor. It is a code editor for theme authors. WYSIWYG or Markdown editing belongs to pages/posts and structured theme settings.
+
+Runtime rendering flow
+
+1. Resolve active theme from `site_settings`.
+2. Load theme plugin metadata or editable theme records.
+3. Resolve navigation from database, falling back to theme defaults only if no stored menu exists.
+4. Resolve content route.
+5. Build the render context.
+6. Select the template key.
+7. Render with the runtime engine or built-in Rust plugin.
+8. Apply global response headers and CSP.
+
+Caching:
+
+* Cache parsed runtime templates per theme version/update timestamp.
+* Invalidate cache after template/settings/asset updates.
+* Cache navigation and site settings with cheap invalidation after admin writes.
+* Do not cache admin previews globally.
+
+Security requirements:
+
+* Runtime templates must use HTML autoescaping.
+* Template engine functions must be allowlisted.
+* Template recursion, loop cost, or render fuel must be bounded.
+* Templates must not read arbitrary files.
+* Templates must not make network requests.
+* Templates must not access process environment.
+* User content HTML must be sanitized before rendering.
+* Theme assets must use safe content types.
+* Public route fallback must not shadow admin/system routes.
+* Admin theme CRUD requires an authenticated admin and CSRF protection.
+
+Acceptance criteria
+
+Pages/navigation:
+
+* Admin can create a draft page.
+* Draft page is not publicly visible.
+* Admin can publish a page at `/about`.
+* Published page renders at `/about`.
+* Reserved path such as `/admin/test` is rejected.
+* Admin can add page to primary navigation.
+* Primary navigation renders stored database nav rather than theme defaults.
+* Archiving a page removes or clearly flags it in navigation.
+
+Editable themes:
+
+* Admin can view installed themes.
+* Admin can activate a non-archived theme.
+* Admin cannot archive the active theme.
+* Admin can create an editable copy of a built-in theme.
+* Admin can edit an editable theme template and preview it.
+* Invalid template changes are rejected with a useful error.
+* Valid template changes render on public pages after activation.
+* Smoke tests cover `/admin/themes`, `/admin/pages`, `/admin/navigation`, public page rendering, and reserved path rejection.
+
 ⸻
 
 Suggested Tracking Board
