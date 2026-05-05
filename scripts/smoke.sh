@@ -127,6 +127,20 @@ form_post /admin/login \
 assert_status 200
 assert_contains "Invalid email or password."
 
+for attempt in 1 2 3 4 5; do
+    form_post /admin/login \
+        --data-urlencode "email=rate-${TEST_SLUG}@corroded.local" \
+        --data-urlencode "password=wrong-password"
+    assert_status 200
+    assert_contains "Invalid email or password."
+done
+
+form_post /admin/login \
+    --data-urlencode "email=rate-${TEST_SLUG}@corroded.local" \
+    --data-urlencode "password=wrong-password"
+assert_status 429
+assert_contains "Too many login attempts."
+
 form_post /admin/login \
     --data-urlencode "email=${ADMIN_EMAIL}" \
     --data-urlencode "password=${ADMIN_PASSWORD}"

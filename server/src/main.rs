@@ -36,6 +36,7 @@ pub struct AppState {
     pool: PgPool,
     config: Arc<AppConfig>,
     leptos_options: LeptosOptions,
+    login_rate_limiter: auth::LoginRateLimiter,
 }
 
 impl FromRef<AppState> for LeptosOptions {
@@ -90,6 +91,7 @@ async fn serve(config: AppConfig, pool: PgPool) -> Result<()> {
         pool,
         config: Arc::new(config.clone()),
         leptos_options: leptos_options.clone(),
+        login_rate_limiter: auth::LoginRateLimiter::default(),
     };
     let max_body_bytes = usize::try_from(config.max_upload_bytes).unwrap_or(usize::MAX);
     let uploads = ServeDir::new(config.upload_dir.clone());

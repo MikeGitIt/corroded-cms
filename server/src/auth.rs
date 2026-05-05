@@ -1,4 +1,8 @@
-use std::fmt::Write;
+use std::{
+    collections::HashMap,
+    fmt::Write,
+    sync::{Arc, Mutex},
+};
 
 use anyhow::{Context, Result, anyhow, bail};
 use argon2::{
@@ -25,6 +29,9 @@ use crate::{AppState, config::AppConfig};
 
 const SESSION_COOKIE: &str = "corroded_session";
 const SESSION_DAYS: i64 = 14;
+const LOGIN_FAILURE_LIMIT: u32 = 5;
+const LOGIN_LOCKOUT_MINUTES: i64 = 10;
+const LOGIN_FAILURE_RETENTION_MINUTES: i64 = 15;
 
 #[derive(Debug, Deserialize)]
 pub struct LoginForm {
@@ -53,6 +60,17 @@ pub struct AdminUser {
     pub id: Uuid,
     pub email: String,
     pub display_name: String,
+}
+
+#[derive(Clone, Default)]
+pub struct LoginRateLimiter {
+    entries: Arc<Mutex<HashMap<String, LoginRateLimitEntry>>>,
+}
+
+struct LoginRateLimitEntry {
+    failures: u32,
+    locked_until: Option<DateTime<Utc>>,
+    last_failed_at: DateTime<Utc>,
 }
 
 struct DashboardData {
@@ -109,25 +127,50 @@ pub async fn login_page(State(state): State<AppState>, headers: HeaderMap) -> Re
     login_html(None).into_response()
 }
 
-pub async fn login_submit(State(state): State<AppState>, Form(form): Form<LoginForm>) -> Response {
+pub async fn login_submit(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Form(form): Form<LoginForm>,
+) -> Response {
+    let rate_limit_key = login_rate_limit_key(&headers, &form.email);
+    let now = Utc::now();
+    if state.login_rate_limiter.is_limited(&rate_limit_key, now) {
+        return (
+            StatusCode::TOO_MANY_REQUESTS,
+            login_html(Some("Too many login attempts. Try again later.")),
+        )
+            .into_response();
+    }
+
     match verify_login(&state.pool, &form.email, &form.password).await {
-        Ok(Some(user_id)) => match create_session(&state.pool, &state.config, user_id).await {
-            Ok((token, expires_at)) => {
-                let cookie = session_cookie(&state.config, &token, expires_at);
-                (
-                    StatusCode::SEE_OTHER,
-                    [(LOCATION, "/admin"), (SET_COOKIE, cookie.as_str())],
-                )
-                    .into_response()
+        Ok(Some(user_id)) => {
+            state.login_rate_limiter.record_success(&rate_limit_key);
+            match create_session(&state.pool, &state.config, user_id).await {
+                Ok((token, expires_at)) => {
+                    let cookie = session_cookie(&state.config, &token, expires_at);
+                    (
+                        StatusCode::SEE_OTHER,
+                        [(LOCATION, "/admin"), (SET_COOKIE, cookie.as_str())],
+                    )
+                        .into_response()
+                }
+                Err(error) => {
+                    tracing::error!(?error, "failed to create session");
+                    login_html(Some("Login failed. Try again.")).into_response()
+                }
             }
-            Err(error) => {
-                tracing::error!(?error, "failed to create session");
-                login_html(Some("Login failed. Try again.")).into_response()
-            }
-        },
-        Ok(None) => login_html(Some("Invalid email or password.")).into_response(),
+        }
+        Ok(None) => {
+            state
+                .login_rate_limiter
+                .record_failure(&rate_limit_key, Utc::now());
+            login_html(Some("Invalid email or password.")).into_response()
+        }
         Err(error) => {
             tracing::error!(?error, "failed to verify login");
+            state
+                .login_rate_limiter
+                .record_failure(&rate_limit_key, Utc::now());
             login_html(Some("Invalid email or password.")).into_response()
         }
     }
@@ -233,6 +276,86 @@ async fn verify_login(pool: &PgPool, email: &str, password: &str) -> Result<Opti
         Ok(()) => Ok(Some(user_id)),
         Err(_) => Ok(None),
     }
+}
+
+impl LoginRateLimiter {
+    fn is_limited(&self, key: &str, now: DateTime<Utc>) -> bool {
+        let Ok(mut entries) = self.entries.lock() else {
+            return true;
+        };
+        prune_login_attempts(&mut entries, now);
+
+        entries
+            .get(key)
+            .and_then(|entry| entry.locked_until)
+            .map(|locked_until| locked_until > now)
+            .unwrap_or(false)
+    }
+
+    fn record_failure(&self, key: &str, now: DateTime<Utc>) {
+        let Ok(mut entries) = self.entries.lock() else {
+            return;
+        };
+        prune_login_attempts(&mut entries, now);
+
+        let entry = entries
+            .entry(key.to_owned())
+            .or_insert(LoginRateLimitEntry {
+                failures: 0,
+                locked_until: None,
+                last_failed_at: now,
+            });
+        entry.failures = entry.failures.saturating_add(1);
+        entry.last_failed_at = now;
+        if entry.failures >= LOGIN_FAILURE_LIMIT {
+            entry.locked_until = Some(now + Duration::minutes(LOGIN_LOCKOUT_MINUTES));
+        }
+    }
+
+    fn record_success(&self, key: &str) {
+        if let Ok(mut entries) = self.entries.lock() {
+            entries.remove(key);
+        }
+    }
+}
+
+fn prune_login_attempts(entries: &mut HashMap<String, LoginRateLimitEntry>, now: DateTime<Utc>) {
+    let retention_cutoff = now - Duration::minutes(LOGIN_FAILURE_RETENTION_MINUTES);
+    entries.retain(|_, entry| {
+        entry
+            .locked_until
+            .map(|locked_until| locked_until > now)
+            .unwrap_or(false)
+            || entry.last_failed_at > retention_cutoff
+    });
+}
+
+fn login_rate_limit_key(headers: &HeaderMap, email: &str) -> String {
+    let email = email.trim().to_ascii_lowercase();
+    let ip = client_ip_hint(headers);
+    let mut hasher = Sha256::new();
+    hasher.update(ip.as_bytes());
+    hasher.update(b":");
+    hasher.update(email.as_bytes());
+    format!("{:x}", hasher.finalize())
+}
+
+fn client_ip_hint(headers: &HeaderMap) -> String {
+    headers
+        .get("x-forwarded-for")
+        .and_then(|value| value.to_str().ok())
+        .and_then(|value| value.split(',').next())
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .or_else(|| {
+            headers
+                .get("x-real-ip")
+                .and_then(|value| value.to_str().ok())
+                .map(str::trim)
+                .filter(|value| !value.is_empty())
+        })
+        .unwrap_or("unknown")
+        .to_owned()
 }
 
 async fn update_account(state: &AppState, user: &AdminUser, form: AccountForm) -> Result<()> {
@@ -664,4 +787,36 @@ fn server_error(error: impl std::fmt::Debug) -> Response {
         "internal server error".to_owned(),
     )
         .into_response()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn rate_limiter_locks_after_failed_attempts() {
+        let limiter = LoginRateLimiter::default();
+        let now = Utc::now();
+        let key = "login-key";
+
+        for _ in 0..LOGIN_FAILURE_LIMIT {
+            assert!(!limiter.is_limited(key, now));
+            limiter.record_failure(key, now);
+        }
+
+        assert!(limiter.is_limited(key, now));
+        assert!(!limiter.is_limited(key, now + Duration::minutes(LOGIN_LOCKOUT_MINUTES + 1)));
+    }
+
+    #[test]
+    fn rate_limiter_success_clears_failures() {
+        let limiter = LoginRateLimiter::default();
+        let now = Utc::now();
+        let key = "login-key";
+
+        limiter.record_failure(key, now);
+        limiter.record_success(key);
+
+        assert!(!limiter.is_limited(key, now));
+    }
 }
