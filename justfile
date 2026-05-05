@@ -14,3 +14,7 @@ db-up:
 
 dev:
     cargo leptos watch
+
+restart:
+    cargo leptos build
+    ./scripts/dev-restart.sh

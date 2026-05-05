@@ -47,6 +47,12 @@ just dev
 
 The app listens on `http://127.0.0.1:3000` by default.
 
+Restart the local development server after a build:
+
+```bash
+just restart
+```
+
 ## Common Commands
 
 ```bash
@@ -54,6 +60,7 @@ just check       # cargo check --workspace
 just test        # cargo test --workspace
 just smoke       # endpoint smoke test against a running local server
 cargo leptos build
+just restart     # rebuild, stop the local app server on PORT, and start it again
 ```
 
 ## Configuration
