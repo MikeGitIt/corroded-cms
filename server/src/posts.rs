@@ -28,6 +28,8 @@ struct PostSummary {
     excerpt: String,
     status: String,
     tags: Vec<String>,
+    cover_image_storage_path: Option<String>,
+    cover_image_alt_text: Option<String>,
     published_at: Option<DateTime<Utc>>,
     updated_at: DateTime<Utc>,
 }
@@ -41,6 +43,9 @@ struct PostDetail {
     body_markdown: String,
     body_html: String,
     status: String,
+    cover_image_id: Option<Uuid>,
+    cover_image_storage_path: Option<String>,
+    cover_image_alt_text: Option<String>,
     tag_names: Vec<String>,
     tag_slugs: Vec<String>,
     published_at: Option<DateTime<Utc>>,
@@ -57,7 +62,17 @@ pub struct PostForm {
     body_markdown: String,
     status: String,
     #[serde(default)]
+    cover_image_id: String,
+    #[serde(default)]
     tag_slugs: String,
+}
+
+#[derive(Debug)]
+struct MediaOption {
+    id: Uuid,
+    original_filename: String,
+    storage_path: String,
+    alt_text: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -99,14 +114,18 @@ pub async fn admin_new(State(state): State<AppState>, headers: HeaderMap) -> Res
         return redirect("/admin/login");
     }
 
-    post_form_html(
-        "New Post",
-        "/admin/posts",
-        None,
-        None,
-        &auth::csrf_input(&state, &headers),
-    )
-    .into_response()
+    match list_media_options(&state).await {
+        Ok(media) => post_form_html(
+            "New Post",
+            "/admin/posts",
+            None,
+            &media,
+            None,
+            &auth::csrf_input(&state, &headers),
+        )
+        .into_response(),
+        Err(error) => server_error(error),
+    }
 }
 
 pub async fn admin_create(
@@ -124,14 +143,18 @@ pub async fn admin_create(
 
     match create_post(&state, &user, form).await {
         Ok(id) => redirect(format!("/admin/posts/{id}/edit")),
-        Err(error) => post_form_html(
-            "New Post",
-            "/admin/posts",
-            None,
-            Some(&error.to_string()),
-            &csrf_input,
-        )
-        .into_response(),
+        Err(error) => match list_media_options(&state).await {
+            Ok(media) => post_form_html(
+                "New Post",
+                "/admin/posts",
+                None,
+                &media,
+                Some(&error.to_string()),
+                &csrf_input,
+            )
+            .into_response(),
+            Err(_) => server_error(error),
+        },
     }
 }
 
@@ -145,17 +168,21 @@ pub async fn admin_edit(
     }
 
     match get_post_for_admin(&state, id).await {
-        Ok(Some(post)) => {
-            let action = format!("/admin/posts/{id}");
-            post_form_html(
-                "Edit Post",
-                &action,
-                Some(&post),
-                None,
-                &auth::csrf_input(&state, &headers),
-            )
-            .into_response()
-        }
+        Ok(Some(post)) => match list_media_options(&state).await {
+            Ok(media) => {
+                let action = format!("/admin/posts/{id}");
+                post_form_html(
+                    "Edit Post",
+                    &action,
+                    Some(&post),
+                    &media,
+                    None,
+                    &auth::csrf_input(&state, &headers),
+                )
+                .into_response()
+            }
+            Err(error) => server_error(error),
+        },
         Ok(None) => not_found(),
         Err(error) => server_error(error),
     }
@@ -178,17 +205,21 @@ pub async fn admin_update(
     match update_post(&state, id, form).await {
         Ok(()) => redirect(format!("/admin/posts/{id}/edit")),
         Err(error) => match get_post_for_admin(&state, id).await {
-            Ok(post) => {
-                let action = format!("/admin/posts/{id}");
-                post_form_html(
-                    "Edit Post",
-                    &action,
-                    post.as_ref(),
-                    Some(&error.to_string()),
-                    &csrf_input,
-                )
-                .into_response()
-            }
+            Ok(post) => match list_media_options(&state).await {
+                Ok(media) => {
+                    let action = format!("/admin/posts/{id}");
+                    post_form_html(
+                        "Edit Post",
+                        &action,
+                        post.as_ref(),
+                        &media,
+                        Some(&error.to_string()),
+                        &csrf_input,
+                    )
+                    .into_response()
+                }
+                Err(_) => server_error(error),
+            },
             Err(_) => server_error(error),
         },
     }
@@ -287,9 +318,12 @@ async fn list_admin_posts(state: &AppState, filters: &PostListFilters) -> Result
                posts.status,
                posts.published_at,
                posts.updated_at,
+               cover_image.storage_path AS cover_image_storage_path,
+               cover_image.alt_text AS cover_image_alt_text,
                COALESCE(array_agg(tags.name ORDER BY tags.name)
                    FILTER (WHERE tags.id IS NOT NULL), ARRAY[]::text[]) AS tags
         FROM posts
+        LEFT JOIN media_assets cover_image ON cover_image.id = posts.cover_image_id
         LEFT JOIN post_tags ON post_tags.post_id = posts.id
         LEFT JOIN tags ON tags.id = post_tags.tag_id
         WHERE ($1::text IS NULL OR posts.status = $1)
@@ -299,7 +333,7 @@ async fn list_admin_posts(state: &AppState, filters: &PostListFilters) -> Result
               OR posts.slug ILIKE '%' || $2 || '%'
               OR posts.excerpt ILIKE '%' || $2 || '%'
           )
-        GROUP BY posts.id
+        GROUP BY posts.id, cover_image.id
         ORDER BY posts.updated_at DESC
         LIMIT $3 OFFSET $4
         "#,
@@ -345,15 +379,18 @@ async fn list_public_posts(state: &AppState) -> Result<Vec<PostSummary>> {
                posts.status,
                posts.published_at,
                posts.updated_at,
+               cover_image.storage_path AS cover_image_storage_path,
+               cover_image.alt_text AS cover_image_alt_text,
                COALESCE(array_agg(tags.name ORDER BY tags.name)
                    FILTER (WHERE tags.id IS NOT NULL AND tags.archived_at IS NULL), ARRAY[]::text[]) AS tags
         FROM posts
+        LEFT JOIN media_assets cover_image ON cover_image.id = posts.cover_image_id
         LEFT JOIN post_tags ON post_tags.post_id = posts.id
         LEFT JOIN tags ON tags.id = post_tags.tag_id
         WHERE posts.status = 'published'
           AND posts.published_at IS NOT NULL
           AND posts.published_at <= now()
-        GROUP BY posts.id
+        GROUP BY posts.id, cover_image.id
         ORDER BY posts.published_at DESC, posts.created_at DESC
         LIMIT 10
         "#,
@@ -394,9 +431,12 @@ async fn list_public_posts_for_tag(
                posts.status,
                posts.published_at,
                posts.updated_at,
+               cover_image.storage_path AS cover_image_storage_path,
+               cover_image.alt_text AS cover_image_alt_text,
                COALESCE(array_agg(all_tags.name ORDER BY all_tags.name)
                    FILTER (WHERE all_tags.id IS NOT NULL AND all_tags.archived_at IS NULL), ARRAY[]::text[]) AS tags
         FROM posts
+        LEFT JOIN media_assets cover_image ON cover_image.id = posts.cover_image_id
         JOIN post_tags selected_tag ON selected_tag.post_id = posts.id
         LEFT JOIN post_tags all_post_tags ON all_post_tags.post_id = posts.id
         LEFT JOIN tags all_tags ON all_tags.id = all_post_tags.tag_id
@@ -404,7 +444,7 @@ async fn list_public_posts_for_tag(
           AND posts.status = 'published'
           AND posts.published_at IS NOT NULL
           AND posts.published_at <= now()
-        GROUP BY posts.id
+        GROUP BY posts.id, cover_image.id
         ORDER BY posts.published_at DESC, posts.created_at DESC
         "#,
     )
@@ -430,6 +470,9 @@ async fn get_post_for_admin(state: &AppState, id: Uuid) -> Result<Option<PostDet
                posts.body_markdown,
                posts.body_html,
                posts.status,
+               posts.cover_image_id,
+               cover_image.storage_path AS cover_image_storage_path,
+               cover_image.alt_text AS cover_image_alt_text,
                posts.published_at,
                posts.updated_at,
                COALESCE(array_agg(tags.name ORDER BY tags.name)
@@ -437,10 +480,11 @@ async fn get_post_for_admin(state: &AppState, id: Uuid) -> Result<Option<PostDet
                COALESCE(array_agg(tags.slug ORDER BY tags.name)
                    FILTER (WHERE tags.id IS NOT NULL), ARRAY[]::text[]) AS tag_slugs
         FROM posts
+        LEFT JOIN media_assets cover_image ON cover_image.id = posts.cover_image_id
         LEFT JOIN post_tags ON post_tags.post_id = posts.id
         LEFT JOIN tags ON tags.id = post_tags.tag_id
         WHERE posts.id = $1
-        GROUP BY posts.id
+        GROUP BY posts.id, cover_image.id
         "#,
     )
     .bind(id)
@@ -460,6 +504,9 @@ async fn get_public_post(state: &AppState, slug: &str) -> Result<Option<PostDeta
                posts.body_markdown,
                posts.body_html,
                posts.status,
+               posts.cover_image_id,
+               cover_image.storage_path AS cover_image_storage_path,
+               cover_image.alt_text AS cover_image_alt_text,
                posts.published_at,
                posts.updated_at,
                COALESCE(array_agg(tags.name ORDER BY tags.name)
@@ -467,13 +514,14 @@ async fn get_public_post(state: &AppState, slug: &str) -> Result<Option<PostDeta
                COALESCE(array_agg(tags.slug ORDER BY tags.name)
                    FILTER (WHERE tags.id IS NOT NULL AND tags.archived_at IS NULL), ARRAY[]::text[]) AS tag_slugs
         FROM posts
+        LEFT JOIN media_assets cover_image ON cover_image.id = posts.cover_image_id
         LEFT JOIN post_tags ON post_tags.post_id = posts.id
         LEFT JOIN tags ON tags.id = post_tags.tag_id
         WHERE posts.slug = $1
           AND posts.status = 'published'
           AND posts.published_at IS NOT NULL
           AND posts.published_at <= now()
-        GROUP BY posts.id
+        GROUP BY posts.id, cover_image.id
         "#,
     )
     .bind(slug)
@@ -481,6 +529,30 @@ async fn get_public_post(state: &AppState, slug: &str) -> Result<Option<PostDeta
     .await?;
 
     row.map(post_detail_from_row).transpose()
+}
+
+async fn list_media_options(state: &AppState) -> Result<Vec<MediaOption>> {
+    let rows = sqlx::query(
+        r#"
+        SELECT id, original_filename, storage_path, alt_text
+        FROM media_assets
+        ORDER BY created_at DESC
+        LIMIT 100
+        "#,
+    )
+    .fetch_all(&state.pool)
+    .await?;
+
+    rows.into_iter()
+        .map(|row| {
+            Ok(MediaOption {
+                id: row.try_get("id")?,
+                original_filename: row.try_get("original_filename")?,
+                storage_path: row.try_get("storage_path")?,
+                alt_text: row.try_get("alt_text")?,
+            })
+        })
+        .collect()
 }
 
 async fn create_post(state: &AppState, user: &auth::AdminUser, form: PostForm) -> Result<Uuid> {
@@ -491,8 +563,8 @@ async fn create_post(state: &AppState, user: &auth::AdminUser, form: PostForm) -
 
     let id = sqlx::query_scalar::<_, Uuid>(
         r#"
-        INSERT INTO posts (title, slug, excerpt, body_markdown, body_html, status, author_id, published_at)
-        VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+        INSERT INTO posts (title, slug, excerpt, body_markdown, body_html, status, author_id, published_at, cover_image_id)
+        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
         RETURNING id
         "#,
     )
@@ -504,6 +576,7 @@ async fn create_post(state: &AppState, user: &auth::AdminUser, form: PostForm) -
     .bind(input.status)
     .bind(user.id)
     .bind(published_at)
+    .bind(input.cover_image_id)
     .fetch_one(&state.pool)
     .await?;
 
@@ -525,12 +598,13 @@ async fn update_post(state: &AppState, id: Uuid, form: PostForm) -> Result<()> {
             body_markdown = $4,
             body_html = $5,
             status = $6,
+            cover_image_id = $7,
             published_at = CASE
                 WHEN $6 = 'published' AND published_at IS NULL THEN now()
                 ELSE published_at
             END,
             updated_at = now()
-        WHERE id = $7
+        WHERE id = $8
         "#,
     )
     .bind(input.title)
@@ -539,6 +613,7 @@ async fn update_post(state: &AppState, id: Uuid, form: PostForm) -> Result<()> {
     .bind(input.body_markdown)
     .bind(body_html)
     .bind(input.status)
+    .bind(input.cover_image_id)
     .bind(id)
     .execute(&state.pool)
     .await?;
@@ -573,6 +648,7 @@ struct ValidPostForm {
     excerpt: String,
     body_markdown: String,
     status: String,
+    cover_image_id: Option<Uuid>,
     tags: Vec<(String, String)>,
 }
 
@@ -603,6 +679,11 @@ fn validate_post_form(form: PostForm) -> Result<ValidPostForm> {
         bail!("status is invalid");
     }
 
+    let cover_image_id = match form.cover_image_id.trim() {
+        "" => None,
+        value => Some(Uuid::parse_str(value).map_err(|_| anyhow!("cover image is invalid"))?),
+    };
+
     let tags = parse_tags(&form.tag_slugs)?;
 
     Ok(ValidPostForm {
@@ -611,6 +692,7 @@ fn validate_post_form(form: PostForm) -> Result<ValidPostForm> {
         excerpt,
         body_markdown: form.body_markdown,
         status,
+        cover_image_id,
         tags,
     })
 }
@@ -679,6 +761,8 @@ fn post_summary_from_row(row: sqlx::postgres::PgRow) -> Result<PostSummary> {
         excerpt: row.try_get("excerpt")?,
         status: row.try_get("status")?,
         tags: row.try_get("tags")?,
+        cover_image_storage_path: row.try_get("cover_image_storage_path")?,
+        cover_image_alt_text: row.try_get("cover_image_alt_text")?,
         published_at: row.try_get("published_at")?,
         updated_at: row.try_get("updated_at")?,
     })
@@ -693,6 +777,9 @@ fn post_detail_from_row(row: sqlx::postgres::PgRow) -> Result<PostDetail> {
         body_markdown: row.try_get("body_markdown")?,
         body_html: row.try_get("body_html")?,
         status: row.try_get("status")?,
+        cover_image_id: row.try_get("cover_image_id")?,
+        cover_image_storage_path: row.try_get("cover_image_storage_path")?,
+        cover_image_alt_text: row.try_get("cover_image_alt_text")?,
         tag_names: row.try_get("tag_names")?,
         tag_slugs: row.try_get("tag_slugs")?,
         published_at: row.try_get("published_at")?,
@@ -775,6 +862,7 @@ fn post_form_html(
     title: &str,
     action: &str,
     post: Option<&PostDetail>,
+    media_options: &[MediaOption],
     error: Option<&str>,
     csrf_input: &str,
 ) -> Html<String> {
@@ -784,7 +872,9 @@ fn post_form_html(
     let default_excerpt = post.map(|p| p.excerpt.as_str()).unwrap_or("");
     let default_body = post.map(|p| p.body_markdown.as_str()).unwrap_or("");
     let default_status = post.map(|p| p.status.as_str()).unwrap_or("draft");
+    let default_cover_image_id = post.and_then(|p| p.cover_image_id);
     let default_tags = post.map(|p| p.tag_slugs.join(", ")).unwrap_or_default();
+    let media_options = media_options_html(media_options, default_cover_image_id);
 
     let _ = write!(
         body,
@@ -830,6 +920,13 @@ fn post_form_html(
                 </select>
             </label>
             <label>
+                <span>Cover image</span>
+                <select name="cover_image_id">
+                    <option value="">No cover image</option>
+                    {}
+                </select>
+            </label>
+            <label>
                 <span>Tags</span>
                 <input name="tag_slugs" value="{}" placeholder="rust, cms, release">
             </label>
@@ -850,6 +947,7 @@ fn post_form_html(
         selected_option("draft", "Draft", default_status),
         selected_option("published", "Published", default_status),
         selected_option("archived", "Archived", default_status),
+        media_options,
         escape_html(&default_tags),
         escape_html(default_body),
     );
@@ -913,12 +1011,18 @@ fn public_index_html(posts: &[PostSummary]) -> Html<String> {
                 body,
                 r#"
                 <article class="post-card">
+                    {}
                     <p>{}</p>
                     <h2><a href="/blog/{}">{}</a></h2>
                     <p>{}</p>
                     {}
                 </article>
                 "#,
+                cover_image_html(
+                    post.cover_image_storage_path.as_deref(),
+                    post.cover_image_alt_text.as_deref(),
+                    "post-card-cover",
+                ),
                 post.published_at
                     .map(format_date)
                     .unwrap_or_else(|| "Draft".to_owned()),
@@ -973,6 +1077,7 @@ fn public_detail_html(state: &AppState, post: &PostDetail) -> Html<String> {
             <p class="eyebrow">{}</p>
             <h1>{}</h1>
             {}
+            {}
             <div class="post-body">{}</div>
         </article>
         "#,
@@ -981,6 +1086,11 @@ fn public_detail_html(state: &AppState, post: &PostDetail) -> Html<String> {
             .unwrap_or_else(|| "Unpublished".to_owned()),
         escape_html(&post.title),
         tag_links_with_slugs(&post.tag_names, &post.tag_slugs),
+        cover_image_html(
+            post.cover_image_storage_path.as_deref(),
+            post.cover_image_alt_text.as_deref(),
+            "post-cover",
+        ),
         post.body_html,
     );
 
@@ -1008,12 +1118,18 @@ fn public_tag_html(tag_name: &str, slug: &str, posts: &[PostSummary]) -> Html<St
             body,
             r#"
             <article class="post-card">
+                {}
                 <p>{}</p>
                 <h2><a href="/blog/{}">{}</a></h2>
                 <p>{}</p>
                 {}
             </article>
             "#,
+            cover_image_html(
+                post.cover_image_storage_path.as_deref(),
+                post.cover_image_alt_text.as_deref(),
+                "post-card-cover",
+            ),
             post.published_at
                 .map(format_date)
                 .unwrap_or_else(|| "Draft".to_owned()),
@@ -1056,6 +1172,49 @@ fn tag_links_with_slugs(names: &[String], slugs: &[String]) -> String {
     }
     body.push_str("</div>");
     body
+}
+
+fn media_options_html(media_options: &[MediaOption], current: Option<Uuid>) -> String {
+    let mut body = String::new();
+    for media in media_options {
+        let selected = (Some(media.id) == current)
+            .then_some(" selected")
+            .unwrap_or("");
+        let label = match media.alt_text.as_deref().filter(|value| !value.is_empty()) {
+            Some(alt_text) => format!(
+                "{} - {} (/uploads/{})",
+                media.original_filename, alt_text, media.storage_path
+            ),
+            None => format!(
+                "{} (/uploads/{})",
+                media.original_filename, media.storage_path
+            ),
+        };
+        let _ = write!(
+            body,
+            r#"<option value="{}"{}>{}</option>"#,
+            media.id,
+            selected,
+            escape_html(&label)
+        );
+    }
+    body
+}
+
+fn cover_image_html(
+    storage_path: Option<&str>,
+    alt_text: Option<&str>,
+    class_name: &str,
+) -> String {
+    let Some(storage_path) = storage_path else {
+        return String::new();
+    };
+    format!(
+        r#"<img class="{}" src="/uploads/{}" alt="{}" loading="lazy">"#,
+        escape_html(class_name),
+        escape_html(storage_path),
+        escape_html(alt_text.unwrap_or(""))
+    )
 }
 
 fn selected_option(value: &str, label: &str, current: &str) -> String {

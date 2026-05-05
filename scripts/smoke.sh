@@ -20,6 +20,7 @@ TEST_TAG="Smoke Test"
 TEST_TAG_SLUG="smoke-test"
 TEST_ALT_TEXT="Smoke image ${TEST_SLUG}"
 CSRF_TOKEN=""
+COVER_IMAGE_ID=""
 
 fail() {
     printf 'FAIL: %s\n' "$*" >&2
@@ -177,6 +178,13 @@ request GET "$UPLOADED_PATH"
 assert_status 200
 assert_header_contains cache-control "max-age=31536000"
 
+request GET /admin/posts/new -b "$COOKIE_JAR" -c "$COOKIE_JAR"
+assert_status 200
+assert_contains "$UPLOADED_PATH"
+COVER_OPTION="$(tr '<' '\n' <"$BODY_FILE" | grep -F "$UPLOADED_PATH" | head -n 1)"
+COVER_IMAGE_ID="$(printf '%s' "$COVER_OPTION" | sed -n 's/.*value="\([0-9a-f-]\{36\}\)".*/\1/p')"
+[[ -n "$COVER_IMAGE_ID" ]] || fail "could not find uploaded media option"
+
 request GET /admin/posts -b "$COOKIE_JAR" -c "$COOKIE_JAR"
 assert_status 200
 assert_contains "Posts"
@@ -187,6 +195,7 @@ form_post /admin/posts \
     --data-urlencode "slug=${TEST_SLUG}" \
     --data-urlencode "excerpt=Smoke test published post" \
     --data-urlencode "status=published" \
+    --data-urlencode "cover_image_id=${COVER_IMAGE_ID}" \
     --data-urlencode "tag_slugs=${TEST_TAG}" \
     --data-urlencode $'body_markdown=# Smoke Test\n\nThis is **scripted** endpoint verification.'
 assert_status 303
@@ -206,10 +215,12 @@ assert_header_contains x-content-type-options "nosniff"
 assert_header_contains referrer-policy "strict-origin-when-cross-origin"
 assert_header_contains permissions-policy "geolocation=()"
 assert_contains "$TEST_TITLE"
+assert_contains "$UPLOADED_PATH"
 
 request GET "/blog/${TEST_SLUG}"
 assert_status 200
 assert_contains "$TEST_TITLE"
+assert_contains "$UPLOADED_PATH"
 assert_contains "<strong>scripted</strong>"
 assert_not_contains "<script>"
 
