@@ -10,7 +10,7 @@ mod tags;
 use std::sync::Arc;
 
 use anyhow::{Context, Result};
-use app::app::{App, shell};
+use app::app::shell;
 use axum::{
     Router,
     body::Body,
@@ -27,7 +27,6 @@ use cli::{Cli, Command};
 use config::AppConfig;
 use leptos::logging::log;
 use leptos::prelude::*;
-use leptos_axum::{LeptosRoutes, generate_route_list};
 use sqlx::{PgPool, postgres::PgPoolOptions};
 use tower_http::{services::ServeDir, trace::TraceLayer};
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
@@ -86,7 +85,6 @@ async fn serve(config: AppConfig, pool: PgPool) -> Result<()> {
     let conf = get_configuration(None).context("failed to read Leptos configuration")?;
     let leptos_options = conf.leptos_options;
     let addr = leptos_options.site_addr;
-    let routes = generate_route_list(App);
 
     let state = AppState {
         pool,
@@ -96,6 +94,7 @@ async fn serve(config: AppConfig, pool: PgPool) -> Result<()> {
     let max_body_bytes = usize::try_from(config.max_upload_bytes).unwrap_or(usize::MAX);
     let uploads = ServeDir::new(config.upload_dir.clone());
     let app = Router::new()
+        .route("/", get(posts::home))
         .route("/healthz", get(healthz))
         .route("/feed.xml", get(feeds::rss))
         .route("/rss.xml", get(feeds::rss_redirect))
@@ -137,10 +136,6 @@ async fn serve(config: AppConfig, pool: PgPool) -> Result<()> {
         )
         .route("/admin/tags/{id}/archive", post(tags::admin_archive))
         .nest_service("/uploads", uploads)
-        .leptos_routes(&state, routes, {
-            let leptos_options = leptos_options.clone();
-            move || shell(leptos_options.clone())
-        })
         .fallback(leptos_axum::file_and_error_handler::<AppState, _>(shell))
         .layer(DefaultBodyLimit::max(max_body_bytes))
         .layer(middleware::from_fn(response_headers))

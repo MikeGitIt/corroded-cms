@@ -282,6 +282,13 @@ pub async fn admin_unpublish(
     }
 }
 
+pub async fn home(State(state): State<AppState>) -> Response {
+    match list_public_posts_with_limit(&state, 5).await {
+        Ok(posts) => public_home_html(&state, &posts).into_response(),
+        Err(error) => server_error(error),
+    }
+}
+
 pub async fn blog_index(State(state): State<AppState>) -> Response {
     match list_public_posts(&state).await {
         Ok(posts) => public_index_html(&posts).into_response(),
@@ -370,6 +377,10 @@ fn normalize_post_list_params(params: PostListParams) -> Result<PostListFilters>
 }
 
 async fn list_public_posts(state: &AppState) -> Result<Vec<PostSummary>> {
+    list_public_posts_with_limit(state, 10).await
+}
+
+async fn list_public_posts_with_limit(state: &AppState, limit: i64) -> Result<Vec<PostSummary>> {
     let rows = sqlx::query(
         r#"
         SELECT posts.id,
@@ -392,9 +403,10 @@ async fn list_public_posts(state: &AppState) -> Result<Vec<PostSummary>> {
           AND posts.published_at <= now()
         GROUP BY posts.id, cover_image.id
         ORDER BY posts.published_at DESC, posts.created_at DESC
-        LIMIT 10
+        LIMIT $1
         "#,
     )
+    .bind(limit)
     .fetch_all(&state.pool)
     .await?;
 
@@ -991,6 +1003,60 @@ fn post_form_html(
     Html(body)
 }
 
+fn public_home_html(state: &AppState, posts: &[PostSummary]) -> Html<String> {
+    let mut body = page_start(&state.config.site_name);
+    let _ = write!(
+        body,
+        r#"
+        <section class="page-header">
+            <p class="eyebrow">{}</p>
+            <h1>{}</h1>
+            <p>{}</p>
+            <p><a class="button-link" href="/blog">View all posts</a></p>
+        </section>
+        <section class="post-list">
+        "#,
+        escape_html(&state.config.site_name),
+        escape_html(&state.config.site_name),
+        escape_html(&state.config.site_description),
+    );
+
+    if posts.is_empty() {
+        body.push_str(r#"<p class="empty-state">No published posts yet.</p>"#);
+    } else {
+        for post in posts {
+            let _ = write!(
+                body,
+                r#"
+                <article class="post-card">
+                    {}
+                    <p>{}</p>
+                    <h2><a href="/blog/{}">{}</a></h2>
+                    <p>{}</p>
+                    {}
+                </article>
+                "#,
+                cover_image_html(
+                    post.cover_image_storage_path.as_deref(),
+                    post.cover_image_alt_text.as_deref(),
+                    "post-card-cover",
+                ),
+                post.published_at
+                    .map(format_date)
+                    .unwrap_or_else(|| "Draft".to_owned()),
+                escape_html(&post.slug),
+                escape_html(&post.title),
+                escape_html(&post.excerpt),
+                tag_links(&post.tags),
+            );
+        }
+    }
+
+    body.push_str("</section>");
+    body.push_str(&page_end());
+    Html(body)
+}
+
 fn public_index_html(posts: &[PostSummary]) -> Html<String> {
     let mut body = page_start("Blog");
     body.push_str(
@@ -1040,7 +1106,19 @@ fn public_index_html(posts: &[PostSummary]) -> Html<String> {
 }
 
 fn public_detail_html(state: &AppState, post: &PostDetail) -> Html<String> {
-    let canonical = format!("{}/blog/{}", state.config.base_url, post.slug);
+    let base_url = state.config.base_url.trim_end_matches('/');
+    let canonical = format!("{base_url}/blog/{}", post.slug);
+    let page_title = format!("{} | {}", post.title, state.config.site_name);
+    let image_url = post
+        .cover_image_storage_path
+        .as_ref()
+        .map(|path| format!("{base_url}/uploads/{path}"));
+    let image_meta = social_image_meta(image_url.as_deref(), post.cover_image_alt_text.as_deref());
+    let twitter_card = if image_url.is_some() {
+        "summary_large_image"
+    } else {
+        "summary"
+    };
     let mut body = format!(
         r#"<!DOCTYPE html>
         <html lang="en">
@@ -1050,6 +1128,15 @@ fn public_detail_html(state: &AppState, post: &PostDetail) -> Html<String> {
             <title>{}</title>
             <meta name="description" content="{}">
             <link rel="canonical" href="{}">
+            <meta property="og:type" content="article">
+            <meta property="og:site_name" content="{}">
+            <meta property="og:title" content="{}">
+            <meta property="og:description" content="{}">
+            <meta property="og:url" content="{}">
+            <meta name="twitter:card" content="{}">
+            <meta name="twitter:title" content="{}">
+            <meta name="twitter:description" content="{}">
+            {}
             <link rel="alternate" type="application/rss+xml" href="/feed.xml">
             <link rel="stylesheet" href="/pkg/corroded-cms.css">
         </head>
@@ -1065,9 +1152,17 @@ fn public_detail_html(state: &AppState, post: &PostDetail) -> Html<String> {
                 </header>
                 <main class="site-main">
         "#,
+        escape_html(&page_title),
+        escape_html(&post.excerpt),
+        escape_html(&canonical),
+        escape_html(&state.config.site_name),
         escape_html(&post.title),
         escape_html(&post.excerpt),
-        escape_html(&canonical)
+        escape_html(&canonical),
+        twitter_card,
+        escape_html(&post.title),
+        escape_html(&post.excerpt),
+        image_meta,
     );
 
     let _ = write!(
@@ -1214,6 +1309,23 @@ fn cover_image_html(
         escape_html(class_name),
         escape_html(storage_path),
         escape_html(alt_text.unwrap_or(""))
+    )
+}
+
+fn social_image_meta(image_url: Option<&str>, alt_text: Option<&str>) -> String {
+    let Some(image_url) = image_url else {
+        return String::new();
+    };
+    let alt_text = alt_text.unwrap_or("");
+    format!(
+        r#"<meta property="og:image" content="{}">
+            <meta property="og:image:alt" content="{}">
+            <meta name="twitter:image" content="{}">
+            <meta name="twitter:image:alt" content="{}">"#,
+        escape_html(image_url),
+        escape_html(alt_text),
+        escape_html(image_url),
+        escape_html(alt_text),
     )
 }
 

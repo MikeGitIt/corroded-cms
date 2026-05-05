@@ -228,11 +228,19 @@ assert_header_contains permissions-policy "geolocation=()"
 assert_contains "$TEST_TITLE"
 assert_contains "$UPLOADED_PATH"
 
+request GET /
+assert_status 200
+assert_contains "$TEST_TITLE"
+assert_contains "$UPLOADED_PATH"
+
 request GET "/blog/${TEST_SLUG}"
 assert_status 200
 assert_contains "$TEST_TITLE"
 assert_contains "$UPLOADED_PATH"
 assert_contains "alt=\"${UPDATED_ALT_TEXT}\""
+assert_contains "property=\"og:image\""
+assert_contains "name=\"twitter:card\" content=\"summary_large_image\""
+assert_contains "${BASE_URL%/}${UPLOADED_PATH}"
 assert_contains "<strong>scripted</strong>"
 assert_not_contains "<script>"
 

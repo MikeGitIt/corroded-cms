@@ -1,9 +1,6 @@
 use leptos::prelude::*;
 use leptos_meta::{Meta, MetaTags, Stylesheet, Title, provide_meta_context};
-use leptos_router::{
-    StaticSegment,
-    components::{Route, Router, Routes},
-};
+use leptos_router::components::Router;
 
 pub fn shell(options: LeptosOptions) -> impl IntoView {
     view! {
@@ -45,25 +42,10 @@ pub fn App() -> impl IntoView {
                 </header>
 
                 <main class="site-main">
-                    <Routes fallback=|| view! { <NotFound/> }.into_view()>
-                        <Route path=StaticSegment("") view=HomePage/>
-                    </Routes>
+                    <NotFound/>
                 </main>
             </div>
         </Router>
-    }
-}
-
-#[component]
-fn HomePage() -> impl IntoView {
-    view! {
-        <section class="page-header">
-            <p class="eyebrow">"Phase 0"</p>
-            <h1>"A Rust-native CMS foundation"</h1>
-            <p>
-                "The Leptos SSR and Axum shell is ready for the CMS modules defined in the PRD."
-            </p>
-        </section>
     }
 }
 
