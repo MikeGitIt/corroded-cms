@@ -183,6 +183,9 @@ assert_contains "/uploads/"
 assert_contains "1 x 1"
 assert_contains "Public URL"
 assert_contains "Markdown"
+assert_contains "/admin.js"
+assert_contains "Copy URL"
+assert_contains "Copy Markdown"
 UPLOADED_PATH="$(awk 'match($0, /\/uploads\/[^"]+/) { print substr($0, RSTART, RLENGTH); exit }' "$BODY_FILE")"
 [[ -n "$UPLOADED_PATH" ]] || fail "could not find uploaded media URL"
 
@@ -195,6 +198,10 @@ assert_status 200
 assert_contains "$UPLOADED_PATH"
 assert_contains "Image snippets"
 assert_contains "![${TEST_ALT_TEXT}](${UPLOADED_PATH})"
+assert_contains "/admin.js"
+assert_contains "Advanced"
+assert_contains "name=\"scheduled_for\""
+assert_contains "Insert"
 COVER_OPTION="$(tr '<' '\n' <"$BODY_FILE" | grep -F "$UPLOADED_PATH" | head -n 1)"
 COVER_IMAGE_ID="$(printf '%s' "$COVER_OPTION" | sed -n 's/.*value="\([0-9a-f-]\{36\}\)".*/\1/p')"
 [[ -n "$COVER_IMAGE_ID" ]] || fail "could not find uploaded media option"
@@ -290,6 +297,7 @@ form_post /admin/posts \
     --data-urlencode "slug=${DRAFT_SLUG}" \
     --data-urlencode "excerpt=Smoke test draft post" \
     --data-urlencode "status=draft" \
+    --data-urlencode "scheduled_for=2035-01-02T03:04" \
     --data-urlencode "tag_slugs=" \
     --data-urlencode "body_markdown=Draft content"
 assert_status 303
@@ -311,6 +319,7 @@ assert_status 404
 request GET "$DRAFT_EDIT_PATH" -b "$COOKIE_JAR" -c "$COOKIE_JAR"
 assert_status 200
 assert_contains "name=\"workflow_status\" value=\"published\""
+assert_contains "value=\"2035-01-02T03:04\""
 
 form_post "$DRAFT_ACTION_PATH" \
     --data-urlencode "csrf_token=${CSRF_TOKEN}" \
@@ -319,6 +328,7 @@ form_post "$DRAFT_ACTION_PATH" \
     --data-urlencode "excerpt=Smoke test draft post" \
     --data-urlencode "status=draft" \
     --data-urlencode "workflow_status=published" \
+    --data-urlencode "scheduled_for=2035-01-02T03:04" \
     --data-urlencode "cover_image_id=${COVER_IMAGE_ID}" \
     --data-urlencode "tag_slugs=" \
     --data-urlencode "body_markdown=Draft content"
@@ -337,6 +347,7 @@ form_post "$DRAFT_ACTION_PATH" \
     --data-urlencode "excerpt=Smoke test draft post" \
     --data-urlencode "status=published" \
     --data-urlencode "workflow_status=draft" \
+    --data-urlencode "scheduled_for=2035-01-02T03:04" \
     --data-urlencode "cover_image_id=${COVER_IMAGE_ID}" \
     --data-urlencode "tag_slugs=" \
     --data-urlencode "body_markdown=Draft content"

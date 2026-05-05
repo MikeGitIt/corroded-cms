@@ -7,7 +7,7 @@ use axum::{
     http::{HeaderMap, StatusCode},
     response::{Html, IntoResponse, Response},
 };
-use chrono::{DateTime, Utc};
+use chrono::{DateTime, NaiveDateTime, TimeZone, Utc};
 use serde::Deserialize;
 use shared::{render_markdown, slugify, validate_slug};
 use sqlx::Row;
@@ -49,6 +49,7 @@ struct PostDetail {
     tag_names: Vec<String>,
     tag_slugs: Vec<String>,
     published_at: Option<DateTime<Utc>>,
+    scheduled_for: Option<DateTime<Utc>>,
     updated_at: DateTime<Utc>,
 }
 
@@ -65,6 +66,8 @@ pub struct PostForm {
     cover_image_id: String,
     #[serde(default)]
     tag_slugs: String,
+    #[serde(default)]
+    scheduled_for: String,
     #[serde(default)]
     workflow_status: String,
 }
@@ -531,6 +534,7 @@ async fn get_post_for_admin(state: &AppState, id: Uuid) -> Result<Option<PostDet
                cover_image.storage_path AS cover_image_storage_path,
                cover_image.alt_text AS cover_image_alt_text,
                posts.published_at,
+               posts.scheduled_for,
                posts.updated_at,
                COALESCE(array_agg(tags.name ORDER BY tags.name)
                    FILTER (WHERE tags.id IS NOT NULL), ARRAY[]::text[]) AS tag_names,
@@ -565,6 +569,7 @@ async fn get_public_post(state: &AppState, slug: &str) -> Result<Option<PostDeta
                cover_image.storage_path AS cover_image_storage_path,
                cover_image.alt_text AS cover_image_alt_text,
                posts.published_at,
+               posts.scheduled_for,
                posts.updated_at,
                COALESCE(array_agg(tags.name ORDER BY tags.name)
                    FILTER (WHERE tags.id IS NOT NULL AND tags.archived_at IS NULL), ARRAY[]::text[]) AS tag_names,
@@ -650,8 +655,8 @@ async fn create_post(state: &AppState, user: &auth::AdminUser, form: PostForm) -
 
     let id = sqlx::query_scalar::<_, Uuid>(
         r#"
-        INSERT INTO posts (title, slug, excerpt, body_markdown, body_html, status, author_id, published_at, cover_image_id)
-        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+        INSERT INTO posts (title, slug, excerpt, body_markdown, body_html, status, author_id, published_at, cover_image_id, scheduled_for)
+        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
         RETURNING id
         "#,
     )
@@ -664,6 +669,7 @@ async fn create_post(state: &AppState, user: &auth::AdminUser, form: PostForm) -
     .bind(user.id)
     .bind(published_at)
     .bind(input.cover_image_id)
+    .bind(input.scheduled_for)
     .fetch_one(&state.pool)
     .await?;
 
@@ -686,12 +692,13 @@ async fn update_post(state: &AppState, id: Uuid, form: PostForm) -> Result<()> {
             body_html = $5,
             status = $6,
             cover_image_id = $7,
+            scheduled_for = $8,
             published_at = CASE
                 WHEN $6 = 'published' AND published_at IS NULL THEN now()
                 ELSE published_at
             END,
             updated_at = now()
-        WHERE id = $8
+        WHERE id = $9
         "#,
     )
     .bind(input.title)
@@ -701,6 +708,7 @@ async fn update_post(state: &AppState, id: Uuid, form: PostForm) -> Result<()> {
     .bind(body_html)
     .bind(input.status)
     .bind(input.cover_image_id)
+    .bind(input.scheduled_for)
     .bind(id)
     .execute(&state.pool)
     .await?;
@@ -736,6 +744,7 @@ struct ValidPostForm {
     body_markdown: String,
     status: String,
     cover_image_id: Option<Uuid>,
+    scheduled_for: Option<DateTime<Utc>>,
     tags: Vec<(String, String)>,
 }
 
@@ -777,6 +786,7 @@ fn validate_post_form(form: PostForm) -> Result<ValidPostForm> {
     };
 
     let tags = parse_tags(&form.tag_slugs)?;
+    let scheduled_for = parse_scheduled_for(&form.scheduled_for)?;
 
     Ok(ValidPostForm {
         title,
@@ -785,8 +795,21 @@ fn validate_post_form(form: PostForm) -> Result<ValidPostForm> {
         body_markdown: form.body_markdown,
         status,
         cover_image_id,
+        scheduled_for,
         tags,
     })
+}
+
+fn parse_scheduled_for(value: &str) -> Result<Option<DateTime<Utc>>> {
+    let value = value.trim();
+    if value.is_empty() {
+        return Ok(None);
+    }
+
+    let parsed = NaiveDateTime::parse_from_str(value, "%Y-%m-%dT%H:%M")
+        .or_else(|_| NaiveDateTime::parse_from_str(value, "%Y-%m-%dT%H:%M:%S"))
+        .map_err(|_| anyhow!("scheduled publish time must be a valid date and time"))?;
+    Ok(Some(Utc.from_utc_datetime(&parsed)))
 }
 
 fn parse_tags(input: &str) -> Result<Vec<(String, String)>> {
@@ -875,6 +898,7 @@ fn post_detail_from_row(row: sqlx::postgres::PgRow) -> Result<PostDetail> {
         tag_names: row.try_get("tag_names")?,
         tag_slugs: row.try_get("tag_slugs")?,
         published_at: row.try_get("published_at")?,
+        scheduled_for: row.try_get("scheduled_for")?,
         updated_at: row.try_get("updated_at")?,
     })
 }
@@ -964,12 +988,17 @@ fn post_form_html(
     let default_excerpt = post.map(|p| p.excerpt.as_str()).unwrap_or("");
     let default_body = post.map(|p| p.body_markdown.as_str()).unwrap_or("");
     let default_status = post.map(|p| p.status.as_str()).unwrap_or("draft");
+    let default_scheduled_for = post
+        .and_then(|p| p.scheduled_for)
+        .map(format_datetime_local)
+        .unwrap_or_default();
     let default_cover_image_id = post.and_then(|p| p.cover_image_id);
     let default_tags = post.map(|p| p.tag_slugs.join(", ")).unwrap_or_default();
     let media_insert_tools = media_insert_tools_html(media_options);
     let media_options = media_options_html(media_options, default_cover_image_id);
     let workflow_button = workflow_submit_button(post);
 
+    body.push_str(r#"<script src="/admin.js" defer></script>"#);
     let _ = write!(
         body,
         r#"
@@ -1024,6 +1053,13 @@ fn post_form_html(
                 <span>Tags</span>
                 <input name="tag_slugs" value="{}" placeholder="rust, cms, release">
             </label>
+            <details class="advanced-fields">
+                <summary>Advanced</summary>
+                <label>
+                    <span>Scheduled publish time</span>
+                    <input name="scheduled_for" type="datetime-local" value="{}">
+                </label>
+            </details>
             <label>
                 <span>Markdown</span>
                 <textarea name="body_markdown" rows="18">{}</textarea>
@@ -1046,6 +1082,7 @@ fn post_form_html(
         selected_option("archived", "Archived", default_status),
         media_options,
         escape_html(&default_tags),
+        escape_html(&default_scheduled_for),
         escape_html(default_body),
         media_insert_tools,
         workflow_button,
@@ -1177,6 +1214,10 @@ fn preview_excerpt_html(excerpt: &str) -> String {
         return String::new();
     }
     format!(r#"<p>{}</p>"#, escape_html(excerpt))
+}
+
+fn format_datetime_local(value: DateTime<Utc>) -> String {
+    value.format("%Y-%m-%dT%H:%M").to_string()
 }
 
 fn public_index_html(posts: &[PostSummary]) -> Html<String> {
@@ -1410,8 +1451,9 @@ fn media_insert_tools_html(media_options: &[MediaOption]) -> String {
         );
         let _ = write!(
             body,
-            r#"<label><span>{}</span><input value="{}" readonly></label>"#,
+            r#"<div class="media-insert-item"><label><span>{}</span><input value="{}" readonly></label><button type="button" class="insert-markdown-image" data-markdown="{}">Insert</button></div>"#,
             escape_html(&media.original_filename),
+            escape_html(&markdown),
             escape_html(&markdown),
         );
     }

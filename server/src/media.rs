@@ -455,6 +455,7 @@ fn dimensions_to_i32(width: u32, height: u32) -> Option<(i32, i32)> {
 
 fn media_html(assets: &[MediaAsset], error: Option<&str>, csrf_input: &str) -> Html<String> {
     let mut body = page_start("Media Library");
+    body.push_str(r#"<script src="/admin.js" defer></script>"#);
     body.push_str(
         r#"
         <section class="editor-header">
@@ -514,10 +515,12 @@ fn media_html(assets: &[MediaAsset], error: Option<&str>, csrf_input: &str) -> H
                                 <span>Public URL</span>
                                 <input value="{}" readonly>
                             </label>
+                            <button type="button" class="copy-value" data-copy="{}">Copy URL</button>
                             <label>
                                 <span>Markdown</span>
                                 <input value="{}" readonly>
                             </label>
+                            <button type="button" class="copy-value" data-copy="{}">Copy Markdown</button>
                         </div>
                         <form method="post" action="/admin/media/{}" class="media-alt-form">
                             {}
@@ -540,6 +543,8 @@ fn media_html(assets: &[MediaAsset], error: Option<&str>, csrf_input: &str) -> H
                 format_size(asset.size_bytes),
                 asset.created_at.format("%Y-%m-%d %H:%M UTC"),
                 escape_html(&url),
+                escape_html(&url),
+                escape_html(&markdown),
                 escape_html(&markdown),
                 asset.id,
                 csrf_input,
