@@ -120,6 +120,7 @@ async fn serve(config: AppConfig, pool: PgPool) -> Result<()> {
             "/admin/media",
             get(media::admin_list).post(media::admin_upload),
         )
+        .route("/admin/media/{id}", post(media::admin_update))
         .route(
             "/admin/posts",
             get(posts::admin_list).post(posts::admin_create),

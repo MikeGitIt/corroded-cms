@@ -2,11 +2,13 @@ use std::{fmt::Write, path::Path};
 
 use anyhow::{Result, bail};
 use axum::{
-    extract::{Multipart, State},
+    Form,
+    extract::{Multipart, Path as AxumPath, State},
     http::{HeaderMap, StatusCode},
     response::{Html, IntoResponse, Response},
 };
 use chrono::{DateTime, Datelike, Utc};
+use serde::Deserialize;
 use sqlx::Row;
 use uuid::Uuid;
 
@@ -17,6 +19,7 @@ use crate::{
 
 #[derive(Debug)]
 struct MediaAsset {
+    id: Uuid,
     filename: String,
     original_filename: String,
     mime_type: String,
@@ -24,6 +27,14 @@ struct MediaAsset {
     storage_path: String,
     alt_text: Option<String>,
     created_at: DateTime<Utc>,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct MediaAltForm {
+    #[serde(default)]
+    csrf_token: String,
+    #[serde(default)]
+    alt_text: String,
 }
 
 struct PendingUpload {
@@ -73,10 +84,40 @@ pub async fn admin_upload(
     }
 }
 
+pub async fn admin_update(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    AxumPath(id): AxumPath<Uuid>,
+    Form(form): Form<MediaAltForm>,
+) -> Response {
+    if auth::current_admin(&state, &headers).await.is_none() {
+        return redirect("/admin/login");
+    }
+    if !auth::verify_csrf(&state, &headers, &form.csrf_token) {
+        return auth::csrf_rejection();
+    }
+
+    match update_alt_text(&state, id, &form.alt_text).await {
+        Ok(()) => redirect("/admin/media"),
+        Err(error) => match list_assets(&state).await {
+            Ok(assets) => (
+                StatusCode::BAD_REQUEST,
+                media_html(
+                    &assets,
+                    Some(&error.to_string()),
+                    &auth::csrf_input(&state, &headers),
+                ),
+            )
+                .into_response(),
+            Err(_) => (StatusCode::BAD_REQUEST, error.to_string()).into_response(),
+        },
+    }
+}
+
 async fn list_assets(state: &AppState) -> Result<Vec<MediaAsset>> {
     let rows = sqlx::query(
         r#"
-        SELECT filename, original_filename, mime_type, size_bytes, storage_path, alt_text, created_at
+        SELECT id, filename, original_filename, mime_type, size_bytes, storage_path, alt_text, created_at
         FROM media_assets
         ORDER BY created_at DESC
         LIMIT 60
@@ -88,6 +129,7 @@ async fn list_assets(state: &AppState) -> Result<Vec<MediaAsset>> {
     rows.into_iter()
         .map(|row| {
             Ok(MediaAsset {
+                id: row.try_get("id")?,
                 filename: row.try_get("filename")?,
                 original_filename: row.try_get("original_filename")?,
                 mime_type: row.try_get("mime_type")?,
@@ -98,6 +140,16 @@ async fn list_assets(state: &AppState) -> Result<Vec<MediaAsset>> {
             })
         })
         .collect()
+}
+
+async fn update_alt_text(state: &AppState, id: Uuid, alt_text: &str) -> Result<()> {
+    let alt_text = normalize_alt_text(alt_text)?;
+    sqlx::query("UPDATE media_assets SET alt_text = $1, updated_at = now() WHERE id = $2")
+        .bind(alt_text)
+        .bind(id)
+        .execute(&state.pool)
+        .await?;
+    Ok(())
 }
 
 async fn store_upload(
@@ -317,6 +369,14 @@ fn media_html(assets: &[MediaAsset], error: Option<&str>, csrf_input: &str) -> H
                         <h2>{}</h2>
                         <p><a href="{}">{}</a></p>
                         <p>{} &middot; {} &middot; {}</p>
+                        <form method="post" action="/admin/media/{}" class="media-alt-form">
+                            {}
+                            <label>
+                                <span>Alt text</span>
+                                <input name="alt_text" value="{}" maxlength="255">
+                            </label>
+                            <button type="submit">Save alt</button>
+                        </form>
                     </div>
                 </article>
                 "#,
@@ -328,6 +388,9 @@ fn media_html(assets: &[MediaAsset], error: Option<&str>, csrf_input: &str) -> H
                 escape_html(&asset.mime_type),
                 format_size(asset.size_bytes),
                 asset.created_at.format("%Y-%m-%d %H:%M UTC"),
+                asset.id,
+                csrf_input,
+                escape_html(alt_text),
             );
         }
         body.push_str("</section>");

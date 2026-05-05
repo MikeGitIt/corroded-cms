@@ -19,6 +19,7 @@ DRAFT_TITLE="Smoke Draft ${TEST_SLUG}"
 TEST_TAG="Smoke Test"
 TEST_TAG_SLUG="smoke-test"
 TEST_ALT_TEXT="Smoke image ${TEST_SLUG}"
+UPDATED_ALT_TEXT="Updated smoke image ${TEST_SLUG}"
 CSRF_TOKEN=""
 COVER_IMAGE_ID=""
 
@@ -185,6 +186,16 @@ COVER_OPTION="$(tr '<' '\n' <"$BODY_FILE" | grep -F "$UPLOADED_PATH" | head -n 1
 COVER_IMAGE_ID="$(printf '%s' "$COVER_OPTION" | sed -n 's/.*value="\([0-9a-f-]\{36\}\)".*/\1/p')"
 [[ -n "$COVER_IMAGE_ID" ]] || fail "could not find uploaded media option"
 
+form_post "/admin/media/${COVER_IMAGE_ID}" \
+    --data-urlencode "csrf_token=${CSRF_TOKEN}" \
+    --data-urlencode "alt_text=${UPDATED_ALT_TEXT}"
+assert_status 303
+assert_location /admin/media
+
+request GET /admin/media -b "$COOKIE_JAR" -c "$COOKIE_JAR"
+assert_status 200
+assert_contains "$UPDATED_ALT_TEXT"
+
 request GET /admin/posts -b "$COOKIE_JAR" -c "$COOKIE_JAR"
 assert_status 200
 assert_contains "Posts"
@@ -221,6 +232,7 @@ request GET "/blog/${TEST_SLUG}"
 assert_status 200
 assert_contains "$TEST_TITLE"
 assert_contains "$UPLOADED_PATH"
+assert_contains "alt=\"${UPDATED_ALT_TEXT}\""
 assert_contains "<strong>scripted</strong>"
 assert_not_contains "<script>"
 

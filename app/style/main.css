@@ -424,6 +424,36 @@ button:focus {
     overflow-wrap: anywhere;
 }
 
+.media-alt-form {
+    display: grid;
+    gap: 0.5rem;
+    margin-top: 0.85rem;
+}
+
+.media-alt-form label {
+    display: grid;
+    gap: 0.35rem;
+}
+
+.media-alt-form span {
+    color: var(--muted);
+    font-size: 0.78rem;
+    font-weight: 700;
+}
+
+.media-alt-form input {
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    color: var(--text);
+    font: inherit;
+    padding: 0.65rem 0.75rem;
+}
+
+.media-alt-form button {
+    justify-self: start;
+    padding: 0.65rem 0.8rem;
+}
+
 .post-list {
     display: grid;
     gap: 1rem;
