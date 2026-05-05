@@ -1358,3 +1358,37 @@ Build Order Summary
 13. Docker deployment
 
 This gives you a clean path from empty repo to a usable Rust-native CMS without drifting into a giant WordPress clone.
+
+⸻
+
+Implementation Status
+
+As of May 5, 2026, the MVP cut line is implemented and verified.
+
+Completed MVP scope
+
+* Auth.
+* First admin creation and account settings.
+* Admin post CRUD.
+* Draft/published/archived status handling.
+* Markdown rendering and server-rendered editor preview.
+* Public blog index and public post detail pages.
+* Tags, tag archives, and admin tag management.
+* Local image uploads, cover images, alt text editing, and media snippets.
+* RSS feed and sitemap.
+* Security hardening: CSRF protection, secure response headers, request IDs, custom error pages, login rate limiting, and upload validation.
+* Tests and smoke verification.
+* Docker deployment.
+* Backup and restore scripts.
+
+Release verification
+
+* `cargo check --workspace` passed.
+* `cargo test --workspace` passed.
+* Local endpoint smoke test passed.
+* Docker Compose app/Postgres startup passed.
+* Admin creation inside the Docker app container passed.
+* Docker endpoint smoke test passed.
+* Backup and restore rehearsal against Docker Postgres passed.
+
+Deferred post-MVP scope remains unchanged: revisions, scheduled publishing automation, comments, multi-author roles, S3-compatible object storage, theme system, and full-text search.

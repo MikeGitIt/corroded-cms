@@ -153,6 +153,14 @@ scripts/restore.sh
 
 `scripts/restore.sh` runs `pg_restore --clean --if-exists`; point it at the intended restore database, not a production database, unless replacing that database is deliberate.
 
+Run the disposable backup/restore rehearsal:
+
+```bash
+just rehearse-backup-restore
+```
+
+The rehearsal starts a temporary PostgreSQL 17 container, seeds a marker row and upload fixture, runs `scripts/backup.sh`, restores into a second database in the same temporary container, verifies the restored database and upload archive, then removes the container. It automatically uses `psql-17`, `pg_dump-17`, and `pg_restore-17` when unversioned client commands are not installed.
+
 ## Configuration
 
 Required environment variables are documented in `.env.example`:

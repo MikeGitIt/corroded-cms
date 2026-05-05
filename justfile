@@ -19,6 +19,9 @@ migrate-local:
     cargo build -p corroded-cms
     ./scripts/dev-local-migrate.sh
 
+rehearse-backup-restore:
+    ./scripts/backup-restore-rehearsal.sh
+
 db-up:
     docker compose up -d postgres
 
