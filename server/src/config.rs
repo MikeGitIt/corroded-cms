@@ -33,6 +33,7 @@ pub struct AppConfig {
     pub environment: Environment,
     pub site_name: String,
     pub site_description: String,
+    pub theme: String,
     pub host: String,
     pub port: u16,
     pub max_upload_bytes: u64,
@@ -48,6 +49,11 @@ impl AppConfig {
             bail!("SESSION_SECRET must be at least 32 bytes in production");
         }
 
+        let theme = optional_string("THEME", crate::theme::DEFAULT_THEME_ID)?;
+        if crate::theme::theme_by_id(&theme).is_none() {
+            bail!("unsupported THEME value `{theme}`");
+        }
+
         Ok(Self {
             database_url: required("DATABASE_URL")?,
             base_url: required("BASE_URL")?,
@@ -56,6 +62,7 @@ impl AppConfig {
             environment,
             site_name: required("SITE_NAME")?,
             site_description: required("SITE_DESCRIPTION")?,
+            theme,
             host: optional_string("HOST", "127.0.0.1")?,
             port: optional_u16("PORT", 3000)?,
             max_upload_bytes: optional_u64("MAX_UPLOAD_BYTES", 5 * 1024 * 1024)?,

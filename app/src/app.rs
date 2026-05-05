@@ -12,6 +12,7 @@ pub fn shell(options: LeptosOptions) -> impl IntoView {
                 <AutoReload options=options.clone()/>
                 <HydrationScripts options/>
                 <MetaTags/>
+                <link rel="icon" type="image/svg+xml" href="/themes/gigatier/favicon.svg"/>
                 <link rel="alternate" type="application/rss+xml" href="/feed.xml"/>
             </head>
             <body>
@@ -27,21 +28,27 @@ pub fn App() -> impl IntoView {
 
     view! {
         <Stylesheet id="leptos" href="/pkg/corroded-cms.css"/>
-        <Title text="Corroded CMS"/>
-        <Meta name="description" content="A Rust-native blog CMS."/>
+        <Title text="GigaTier Technologies"/>
+        <Meta name="description" content="Autonomous C/C++ to Rust transpilation. Verified, validated, delivered."/>
 
         <Router>
-            <div class="app-shell">
+            <div class="app-shell theme-gigatier">
+                <a href="#main" class="skip-link">"Skip to main content"</a>
                 <header class="site-header">
-                    <a class="brand" href="/">"Corroded CMS"</a>
-                    <nav class="site-nav" aria-label="Primary">
-                        <a href="/">"Home"</a>
-                        <a href="/blog">"Blog"</a>
-                        <a href="/admin">"Admin"</a>
-                    </nav>
+                    <div class="container site-header__inner">
+                        <a class="brand" href="/" aria-label="GigaTier home">
+                            <img src="/themes/gigatier/logo.svg" alt="GigaTier" width="220" height="40"/>
+                        </a>
+                        <nav class="site-nav" aria-label="Primary">
+                            <a href="/">"Home"</a>
+                            <a href="/blog">"Blog"</a>
+                            <a href="/feed.xml">"RSS"</a>
+                        </nav>
+                        <a class="nav-action" href="/admin">"Admin"</a>
+                    </div>
                 </header>
 
-                <main class="site-main">
+                <main id="main" class="site-main">
                     <NotFound/>
                 </main>
             </div>

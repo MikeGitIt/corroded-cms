@@ -1,0 +1,18 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 220 40" fill="none">
+  <!-- GigaTier Icon Mark: Three stacked ascending tiers -->
+  <g>
+    <!-- Bottom tier (widest) -->
+    <rect x="2" y="26" width="28" height="6" rx="1.5" fill="#14B8A6" opacity="0.45"/>
+    <!-- Middle tier -->
+    <rect x="6" y="17" width="20" height="6" rx="1.5" fill="#14B8A6" opacity="0.7"/>
+    <!-- Top tier (narrowest) -->
+    <rect x="10" y="8" width="12" height="6" rx="1.5" fill="#14B8A6"/>
+    <!-- Upward accent arrow/chevron -->
+    <path d="M16 2 L21 7 L16 5 L11 7 Z" fill="#14B8A6" opacity="0.9"/>
+  </g>
+
+  <!-- Wordmark: GIGATIER -->
+  <text x="42" y="28" font-family="'Space Grotesk', -apple-system, BlinkMacSystemFont, sans-serif" font-size="22" font-weight="700" letter-spacing="0.06em" fill="#E2E8F0">
+    GIGA<tspan fill="#14B8A6">TIER</tspan>
+  </text>
+</svg>

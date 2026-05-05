@@ -1267,9 +1267,10 @@ CMS-1405 — Object storage
 
 CMS-1406 — Theme system
 
-* Configurable layouts.
-* Site settings table.
-* Custom navigation.
+* Plugin architecture: each theme owns its shell, public templates, assets, default navigation, and footer groups behind a stable server-side theme plugin boundary.
+* Configurable active theme ID with validation against the registered plugin list.
+* Site settings table for editable site-level content and custom navigation.
+* GigaTier remains the first built-in/default theme plugin and reference implementation.
 
 CMS-1407 — Comments
 

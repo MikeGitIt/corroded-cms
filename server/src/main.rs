@@ -6,6 +6,7 @@ mod html;
 mod media;
 mod posts;
 mod tags;
+mod theme;
 
 use std::{sync::Arc, time::Instant};
 
@@ -57,6 +58,8 @@ async fn main() -> Result<()> {
         environment = ?config.environment,
         site_name = %config.site_name,
         site_description = %config.site_description,
+        theme = %config.theme,
+        theme_name = %theme::theme_by_id(&config.theme).map(|theme| theme.display_name()).unwrap_or("unknown"),
         host = %config.host,
         port = config.port,
         max_upload_bytes = config.max_upload_bytes,

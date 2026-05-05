@@ -4,34 +4,15 @@ use axum::{
 };
 
 pub fn page_start(title: &str) -> String {
-    format!(
-        r#"<!DOCTYPE html>
-        <html lang="en">
-        <head>
-            <meta charset="utf-8">
-            <meta name="viewport" content="width=device-width, initial-scale=1">
-            <title>{}</title>
-            <link rel="alternate" type="application/rss+xml" href="/feed.xml">
-            <link rel="stylesheet" href="/pkg/corroded-cms.css">
-        </head>
-        <body>
-            <div class="app-shell">
-                <header class="site-header">
-                    <a class="brand" href="/">Corroded CMS</a>
-                    <nav class="site-nav" aria-label="Primary">
-                        <a href="/">Home</a>
-                        <a href="/blog">Blog</a>
-                        <a href="/admin">Admin</a>
-                    </nav>
-                </header>
-                <main class="site-main">
-        "#,
-        escape_html(title)
-    )
+    page_start_with_head(title, "")
+}
+
+pub fn page_start_with_head(title: &str, extra_head: &str) -> String {
+    crate::theme::active_theme_from_env().page_start(title, extra_head)
 }
 
 pub fn page_end() -> String {
-    "</main></div></body></html>".to_owned()
+    crate::theme::active_theme_from_env().page_end()
 }
 
 pub fn escape_html(value: &str) -> String {

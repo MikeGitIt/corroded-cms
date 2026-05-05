@@ -11,8 +11,9 @@ services:
       SESSION_SECRET: dev-only-change-me-to-at-least-32-bytes
       UPLOAD_DIR: /app/uploads
       ENVIRONMENT: development
-      SITE_NAME: Corroded CMS
-      SITE_DESCRIPTION: A Rust-native blog CMS.
+      SITE_NAME: GigaTier Technologies
+      SITE_DESCRIPTION: Autonomous C/C++ to Rust transpilation. Verified, validated, delivered.
+      THEME: gigatier
       RUST_LOG: corroded_cms=info,tower_http=info
       HOST: 0.0.0.0
       PORT: "3000"

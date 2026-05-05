@@ -15,7 +15,10 @@ use uuid::Uuid;
 
 use crate::{
     AppState, auth,
-    html::{escape_html, not_found_page, page_end, page_start, redirect, server_error_page},
+    html::{
+        escape_html, not_found_page, page_end, page_start, page_start_with_head, redirect,
+        server_error_page,
+    },
 };
 
 const ADMIN_POST_PAGE_SIZE: i64 = 25;
@@ -1122,51 +1125,95 @@ fn public_home_html(state: &AppState, posts: &[PostSummary]) -> Html<String> {
     let _ = write!(
         body,
         r#"
-        <section class="page-header">
-            <p class="eyebrow">{}</p>
-            <h1>{}</h1>
-            <p>{}</p>
-            <p><a class="button-link" href="/blog">View all posts</a></p>
+        <section class="hero">
+            <div class="hero__bg"></div>
+            <div class="hero__content">
+                <span class="hero__label">Introducing Velociportr</span>
+                <h1 class="hero__title">{}<span class="text-gradient">Autonomous C/C++ to Rust Transpilation</span></h1>
+                <p class="hero__subtitle">{}</p>
+                <div class="hero__actions">
+                    <a class="btn btn--primary btn--lg" href="/#solution">Explore Velociportr</a>
+                    <a class="btn btn--secondary btn--lg" href="/blog">Read the blog</a>
+                </div>
+            </div>
         </section>
-        <section class="post-list">
+        <section id="problem" class="section section--dark">
+            <div class="container">
+                <div class="section-header">
+                    <span class="label">The Problem</span>
+                    <h2>Memory-Unsafe Code Is a Security Risk</h2>
+                    <p>Legacy C and C++ systems remain central to government and industry, but manual rewrites are slow, costly, and hard to staff.</p>
+                </div>
+                <div class="stats">
+                    <div class="stat"><div class="stat__value">70%</div><div class="stat__label">Critical CVEs tied to memory safety</div></div>
+                    <div class="stat"><div class="stat__value">50B+</div><div class="stat__label">Lines of C/C++ in production</div></div>
+                    <div class="stat"><div class="stat__value">2+ yrs</div><div class="stat__label">Typical manual rewrite timeline</div></div>
+                    <div class="stat"><div class="stat__value">10x</div><div class="stat__label">Manual migration cost multiplier</div></div>
+                </div>
+                <div class="grid grid-3">
+                    <article class="card card--glass">
+                        <p class="card__kicker">Security</p>
+                        <h3 class="card__title">Vulnerability Reduction</h3>
+                        <p class="card__text">Move critical software away from buffer overflows, use-after-free defects, and data race classes.</p>
+                    </article>
+                    <article class="card card--glass">
+                        <p class="card__kicker">Delivery</p>
+                        <h3 class="card__title">Faster Modernization</h3>
+                        <p class="card__text">Automated migration compresses rewrite timelines without freezing product engineering work.</p>
+                    </article>
+                    <article class="card card--glass">
+                        <p class="card__kicker">Talent</p>
+                        <h3 class="card__title">Rust Expertise at Scale</h3>
+                        <p class="card__text">Pair autonomous translation with expert review so scarce Rust talent focuses where it matters most.</p>
+                    </article>
+                </div>
+            </div>
+        </section>
+        <section id="solution" class="section section--mid-dark">
+            <div class="container">
+                <div class="section-header">
+                    <span class="label">The Solution</span>
+                    <h2>Velociportr: A 5-Stage Autonomous Pipeline</h2>
+                    <p>From raw C/C++ to verified Rust, automated, validated, and prepared for production review.</p>
+                </div>
+                <div class="pipeline-grid">
+                    <article class="card card--dark"><span class="badge">Stage 1</span><h3 class="card__title">Preprocessing &amp; Analysis</h3><p class="card__text">Complexity analysis, semantic mapping, and data flow analysis prepare the codebase.</p></article>
+                    <article class="card card--dark"><span class="badge">Stage 2</span><h3 class="card__title">LLM Code Generation</h3><p class="card__text">AI-powered transpilation produces Rust with idiomatic patterns and targeted patching.</p></article>
+                    <article class="card card--dark"><span class="badge">Stage 3</span><h3 class="card__title">Oracle Verification</h3><p class="card__text">IR comparison verifies behavioral equivalence between source and generated code.</p></article>
+                    <article class="card card--dark"><span class="badge">Stage 4</span><h3 class="card__title">Correction Loop</h3><p class="card__text">Failed units are regenerated and retested until the verification target is met.</p></article>
+                    <article class="card card--dark"><span class="badge">Stage 5</span><h3 class="card__title">Human Review</h3><p class="card__text">Experienced engineers review logic, edge cases, and production readiness.</p></article>
+                </div>
+            </div>
+        </section>
+        <section id="traction" class="section section--light">
+            <div class="container">
+                <div class="section-header">
+                    <span class="label">Traction</span>
+                    <h2>Proven at Scale: The JQ Port</h2>
+                    <p>GigaTier ported the JQ JSON processor, a complex real-world C codebase, to Rust autonomously.</p>
+                </div>
+                <div class="stats stats--light">
+                    <div class="stat"><div class="stat__value">139K</div><div class="stat__label">Lines of code</div></div>
+                    <div class="stat"><div class="stat__value">131</div><div class="stat__label">Files transpiled</div></div>
+                    <div class="stat"><div class="stat__value">&lt;8 days</div><div class="stat__label">Total processing time</div></div>
+                    <div class="stat"><div class="stat__value">100%</div><div class="stat__label">Behavioral equivalence verified</div></div>
+                </div>
+            </div>
+        </section>
+        <section id="latest" class="section section--dark">
+            <div class="container">
+                <div class="section-header">
+                    <span class="label">Latest</span>
+                    <h2>Field Notes</h2>
+                    <p>Updates from the GigaTier team.</p>
+                </div>
         "#,
-        escape_html(&state.config.site_name),
         escape_html(&state.config.site_name),
         escape_html(&state.config.site_description),
     );
 
-    if posts.is_empty() {
-        body.push_str(r#"<p class="empty-state">No published posts yet.</p>"#);
-    } else {
-        for post in posts {
-            let _ = write!(
-                body,
-                r#"
-                <article class="post-card">
-                    {}
-                    <p>{}</p>
-                    <h2><a href="/blog/{}">{}</a></h2>
-                    <p>{}</p>
-                    {}
-                </article>
-                "#,
-                cover_image_html(
-                    post.cover_image_storage_path.as_deref(),
-                    post.cover_image_alt_text.as_deref(),
-                    "post-card-cover",
-                ),
-                post.published_at
-                    .map(format_date)
-                    .unwrap_or_else(|| "Draft".to_owned()),
-                escape_html(&post.slug),
-                escape_html(&post.title),
-                escape_html(&post.excerpt),
-                tag_links(&post.tags),
-            );
-        }
-    }
-
-    body.push_str("</section>");
+    body.push_str(&public_post_grid(posts, "No published posts yet."));
+    body.push_str("</div></section>");
     body.push_str(&page_end());
     Html(body)
 }
@@ -1199,12 +1246,14 @@ fn markdown_preview_html(
     let _ = write!(
         body,
         r#"
-        <article class="post-detail">
-            <p class="eyebrow">Preview</p>
-            <h1>{}</h1>
+        <article class="article post-detail">
+            <header class="article__header">
+                <span class="badge">Preview</span>
+                <h1 class="article__title">{}</h1>
+                {}
+            </header>
             {}
-            {}
-            <div class="post-body">{}</div>
+            <div class="article__content post-body">{}</div>
         </article>
         "#,
         escape_html(title),
@@ -1231,46 +1280,20 @@ fn public_index_html(posts: &[PostSummary]) -> Html<String> {
     let mut body = page_start("Blog");
     body.push_str(
         r#"
-        <section class="page-header">
-            <p class="eyebrow">Blog</p>
-            <h1>Latest posts</h1>
+        <section class="page-hero section section--dark">
+            <div class="container">
+                <span class="hero__label">Blog</span>
+                <h1>Latest Posts</h1>
+                <p>Research notes, product updates, and migration lessons from GigaTier.</p>
+            </div>
         </section>
-        <section class="post-list">
+        <section class="section section--mid-dark">
+            <div class="container">
         "#,
     );
 
-    if posts.is_empty() {
-        body.push_str(r#"<p class="empty-state">No published posts yet.</p>"#);
-    } else {
-        for post in posts {
-            let _ = write!(
-                body,
-                r#"
-                <article class="post-card">
-                    {}
-                    <p>{}</p>
-                    <h2><a href="/blog/{}">{}</a></h2>
-                    <p>{}</p>
-                    {}
-                </article>
-                "#,
-                cover_image_html(
-                    post.cover_image_storage_path.as_deref(),
-                    post.cover_image_alt_text.as_deref(),
-                    "post-card-cover",
-                ),
-                post.published_at
-                    .map(format_date)
-                    .unwrap_or_else(|| "Draft".to_owned()),
-                escape_html(&post.slug),
-                escape_html(&post.title),
-                escape_html(&post.excerpt),
-                tag_links(&post.tags),
-            );
-        }
-    }
-
-    body.push_str("</section>");
+    body.push_str(&public_post_grid(posts, "No published posts yet."));
+    body.push_str("</div></section>");
     body.push_str(&page_end());
     Html(body)
 }
@@ -1289,13 +1312,8 @@ fn public_detail_html(state: &AppState, post: &PostDetail) -> Html<String> {
     } else {
         "summary"
     };
-    let mut body = format!(
-        r#"<!DOCTYPE html>
-        <html lang="en">
-        <head>
-            <meta charset="utf-8">
-            <meta name="viewport" content="width=device-width, initial-scale=1">
-            <title>{}</title>
+    let extra_head = format!(
+        r#"
             <meta name="description" content="{}">
             <link rel="canonical" href="{}">
             <meta property="og:type" content="article">
@@ -1307,22 +1325,7 @@ fn public_detail_html(state: &AppState, post: &PostDetail) -> Html<String> {
             <meta name="twitter:title" content="{}">
             <meta name="twitter:description" content="{}">
             {}
-            <link rel="alternate" type="application/rss+xml" href="/feed.xml">
-            <link rel="stylesheet" href="/pkg/corroded-cms.css">
-        </head>
-        <body>
-            <div class="app-shell">
-                <header class="site-header">
-                    <a class="brand" href="/">Corroded CMS</a>
-                    <nav class="site-nav" aria-label="Primary">
-                        <a href="/">Home</a>
-                        <a href="/blog">Blog</a>
-                        <a href="/admin">Admin</a>
-                    </nav>
-                </header>
-                <main class="site-main">
         "#,
-        escape_html(&page_title),
         escape_html(&post.excerpt),
         escape_html(&canonical),
         escape_html(&state.config.site_name),
@@ -1334,22 +1337,27 @@ fn public_detail_html(state: &AppState, post: &PostDetail) -> Html<String> {
         escape_html(&post.excerpt),
         image_meta,
     );
+    let mut body = page_start_with_head(&page_title, &extra_head);
 
     let _ = write!(
         body,
         r#"
-        <article class="post-detail">
-            <p class="eyebrow">{}</p>
-            <h1>{}</h1>
+        <article class="article post-detail">
+            <header class="article__header">
+                <span class="badge">{}</span>
+                <h1 class="article__title">{}</h1>
+                <p class="article__excerpt">{}</p>
+                {}
+            </header>
             {}
-            {}
-            <div class="post-body">{}</div>
+            <div class="article__content post-body">{}</div>
         </article>
         "#,
         post.published_at
             .map(format_date)
             .unwrap_or_else(|| "Unpublished".to_owned()),
         escape_html(&post.title),
+        escape_html(&post.excerpt),
         tag_links_with_slugs(&post.tag_names, &post.tag_slugs),
         cover_image_html_with_loading(
             post.cover_image_storage_path.as_deref(),
@@ -1370,46 +1378,96 @@ fn public_tag_html(tag_name: &str, slug: &str, posts: &[PostSummary]) -> Html<St
     let _ = write!(
         body,
         r#"
-        <section class="page-header">
-            <p class="eyebrow">Tag</p>
-            <h1>{}</h1>
+        <section class="page-hero section section--dark">
+            <div class="container">
+                <span class="hero__label">Tag</span>
+                <h1>{}</h1>
+                <p>Published posts filed under this topic.</p>
+            </div>
         </section>
-        <section class="post-list" data-tag="{}">
+        <section class="section section--mid-dark" data-tag="{}">
+            <div class="container">
         "#,
         escape_html(tag_name),
         escape_html(slug)
     );
 
-    for post in posts {
-        let _ = write!(
-            body,
-            r#"
-            <article class="post-card">
-                {}
-                <p>{}</p>
-                <h2><a href="/blog/{}">{}</a></h2>
-                <p>{}</p>
-                {}
-            </article>
-            "#,
-            cover_image_html(
-                post.cover_image_storage_path.as_deref(),
-                post.cover_image_alt_text.as_deref(),
-                "post-card-cover",
-            ),
-            post.published_at
-                .map(format_date)
-                .unwrap_or_else(|| "Draft".to_owned()),
-            escape_html(&post.slug),
-            escape_html(&post.title),
-            escape_html(&post.excerpt),
-            tag_links(&post.tags),
+    body.push_str(&public_post_grid(posts, "No published posts for this tag yet."));
+    body.push_str("</div></section>");
+    body.push_str(&page_end());
+    Html(body)
+}
+
+fn public_post_grid(posts: &[PostSummary], empty_message: &str) -> String {
+    if posts.is_empty() {
+        return format!(
+            r#"<p class="empty-state">{}</p>"#,
+            escape_html(empty_message)
         );
     }
 
-    body.push_str("</section>");
-    body.push_str(&page_end());
-    Html(body)
+    let mut body = String::from(r#"<div class="blog-grid">"#);
+    for post in posts {
+        body.push_str(&public_post_card(post));
+    }
+    body.push_str("</div>");
+    body
+}
+
+fn public_post_card(post: &PostSummary) -> String {
+    let href = format!("/blog/{}", post.slug);
+    let image = public_post_card_image(post, &href);
+    let date = post
+        .published_at
+        .map(format_date)
+        .unwrap_or_else(|| "Draft".to_owned());
+    format!(
+        r#"
+        <article class="blog-card">
+            {}
+            <div class="blog-card__body">
+                <div class="blog-card__meta"><span>{}</span>{}</div>
+                <h2 class="blog-card__title"><a href="{}">{}</a></h2>
+                <p class="blog-card__excerpt">{}</p>
+                {}
+            </div>
+        </article>
+        "#,
+        image,
+        escape_html(&date),
+        first_tag_badge(&post.tags),
+        escape_html(&href),
+        escape_html(&post.title),
+        escape_html(&post.excerpt),
+        tag_links(&post.tags),
+    )
+}
+
+fn public_post_card_image(post: &PostSummary, href: &str) -> String {
+    let image = cover_image_html(
+        post.cover_image_storage_path.as_deref(),
+        post.cover_image_alt_text.as_deref(),
+        "blog-card__cover post-card-cover",
+    );
+    if image.is_empty() {
+        format!(
+            r#"<a class="blog-card__image blog-card__image--placeholder" href="{}"><span>GigaTier</span></a>"#,
+            escape_html(href)
+        )
+    } else {
+        format!(
+            r#"<a class="blog-card__image" href="{}">{}</a>"#,
+            escape_html(href),
+            image
+        )
+    }
+}
+
+fn first_tag_badge(tags: &[String]) -> String {
+    let Some(tag) = tags.first() else {
+        return String::new();
+    };
+    format!(r#"<span class="blog-card__tag">{}</span>"#, escape_html(tag))
 }
 
 fn tag_links(tags: &[String]) -> String {

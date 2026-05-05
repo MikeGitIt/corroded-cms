@@ -1,6 +1,6 @@
 # Corroded CMS
 
-Corroded CMS is a Rust-native blog CMS built with Leptos SSR, Axum, PostgreSQL, and SQLx. The MVP includes admin authentication, post drafting and publishing, tags, local image uploads, RSS, sitemap generation, CSRF protection, and security response headers.
+Corroded CMS is a Rust-native blog CMS built with Leptos SSR, Axum, PostgreSQL, and SQLx. The MVP includes admin authentication, post drafting and publishing, tags, local image uploads, RSS, sitemap generation, CSRF protection, and security response headers. The default site theme is the built-in GigaTier theme plugin.
 
 ## Prerequisites
 
@@ -173,7 +173,9 @@ Required environment variables are documented in `.env.example`:
 - `SITE_NAME`
 - `SITE_DESCRIPTION`
 
-Optional runtime variables include `RUST_LOG`, `HOST`, `PORT`, and `MAX_UPLOAD_BYTES`.
+Optional runtime variables include `THEME`, `RUST_LOG`, `HOST`, `PORT`, and `MAX_UPLOAD_BYTES`.
+
+`THEME` selects the active theme plugin. The bundled default is `gigatier`; new themes should register through the server theme plugin boundary instead of hard-coding alternate page shells.
 
 ## Repository Layout
 
