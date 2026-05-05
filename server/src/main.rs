@@ -13,8 +13,13 @@ use anyhow::{Context, Result};
 use app::app::{App, shell};
 use axum::{
     Router,
+    body::Body,
     extract::{DefaultBodyLimit, FromRef, State},
-    http::StatusCode,
+    http::{
+        HeaderValue, Request, StatusCode,
+        header::{CACHE_CONTROL, CONTENT_SECURITY_POLICY, HeaderName, X_CONTENT_TYPE_OPTIONS},
+    },
+    middleware::{self, Next},
     response::{IntoResponse, Response},
     routing::{get, post},
 };
@@ -135,6 +140,7 @@ async fn serve(config: AppConfig, pool: PgPool) -> Result<()> {
         })
         .fallback(leptos_axum::file_and_error_handler::<AppState, _>(shell))
         .layer(DefaultBodyLimit::max(max_body_bytes))
+        .layer(middleware::from_fn(response_headers))
         .layer(TraceLayer::new_for_http())
         .with_state(state);
 
@@ -177,6 +183,38 @@ async fn healthz(State(state): State<AppState>) -> Response {
             .into_response(),
         Err(_) => (StatusCode::SERVICE_UNAVAILABLE, "database unavailable").into_response(),
     }
+}
+
+async fn response_headers(request: Request<Body>, next: Next) -> Response {
+    let is_upload = request.uri().path().starts_with("/uploads/");
+    let mut response = next.run(request).await;
+    let should_cache_upload = is_upload && response.status().is_success();
+    let headers = response.headers_mut();
+
+    headers.insert(
+        CONTENT_SECURITY_POLICY,
+        HeaderValue::from_static(
+            "default-src 'self'; base-uri 'self'; frame-ancestors 'none'; object-src 'none'; form-action 'self'; img-src 'self' data:; script-src 'self' 'wasm-unsafe-eval'; style-src 'self' 'unsafe-inline'; connect-src 'self' ws: wss:",
+        ),
+    );
+    headers.insert(X_CONTENT_TYPE_OPTIONS, HeaderValue::from_static("nosniff"));
+    headers.insert(
+        HeaderName::from_static("referrer-policy"),
+        HeaderValue::from_static("strict-origin-when-cross-origin"),
+    );
+    headers.insert(
+        HeaderName::from_static("permissions-policy"),
+        HeaderValue::from_static("camera=(), microphone=(), geolocation=(), payment=()"),
+    );
+
+    if should_cache_upload {
+        headers.insert(
+            CACHE_CONTROL,
+            HeaderValue::from_static("public, max-age=31536000, immutable"),
+        );
+    }
+
+    response
 }
 
 fn init_tracing() {

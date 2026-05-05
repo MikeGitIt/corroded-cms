@@ -65,6 +65,14 @@ assert_location() {
     [[ "$actual" == "$expected" ]] || fail "expected Location ${expected}, got ${actual}"
 }
 
+assert_header_contains() {
+    local name="$1"
+    local expected="$2"
+    local actual
+    actual="$(header_value "$name")"
+    [[ "$actual" == *"$expected"* ]] || fail "expected ${name} header to contain ${expected}, got ${actual}"
+}
+
 assert_contains() {
     local expected="$1"
     grep -Fq "$expected" "$BODY_FILE" || fail "expected response to contain: ${expected}"
@@ -165,6 +173,7 @@ UPLOADED_PATH="$(awk 'match($0, /\/uploads\/[^"]+/) { print substr($0, RSTART, R
 
 request GET "$UPLOADED_PATH"
 assert_status 200
+assert_header_contains cache-control "max-age=31536000"
 
 request GET /admin/posts -b "$COOKIE_JAR" -c "$COOKIE_JAR"
 assert_status 200
@@ -186,6 +195,10 @@ assert_contains "$TEST_TITLE"
 
 request GET /blog
 assert_status 200
+assert_header_contains content-security-policy "default-src 'self'"
+assert_header_contains x-content-type-options "nosniff"
+assert_header_contains referrer-policy "strict-origin-when-cross-origin"
+assert_header_contains permissions-policy "geolocation=()"
 assert_contains "$TEST_TITLE"
 
 request GET "/blog/${TEST_SLUG}"
