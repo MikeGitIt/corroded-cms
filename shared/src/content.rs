@@ -37,4 +37,11 @@ mod tests {
         assert!(!html.contains("<script>"));
         assert!(!html.contains("javascript:"));
     }
+
+    #[test]
+    fn preserves_safe_images() {
+        let html = render_markdown("![Alt text](/uploads/2026/05/image.png)");
+
+        assert!(html.contains(r#"<img src="/uploads/2026/05/image.png" alt="Alt text""#));
+    }
 }

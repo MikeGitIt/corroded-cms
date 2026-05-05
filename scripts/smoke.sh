@@ -180,6 +180,9 @@ assert_status 200
 assert_contains "$TEST_ALT_TEXT"
 assert_contains "smoke.png"
 assert_contains "/uploads/"
+assert_contains "1 x 1"
+assert_contains "Public URL"
+assert_contains "Markdown"
 UPLOADED_PATH="$(awk 'match($0, /\/uploads\/[^"]+/) { print substr($0, RSTART, RLENGTH); exit }' "$BODY_FILE")"
 [[ -n "$UPLOADED_PATH" ]] || fail "could not find uploaded media URL"
 
@@ -190,6 +193,8 @@ assert_header_contains cache-control "max-age=31536000"
 request GET /admin/posts/new -b "$COOKIE_JAR" -c "$COOKIE_JAR"
 assert_status 200
 assert_contains "$UPLOADED_PATH"
+assert_contains "Image snippets"
+assert_contains "![${TEST_ALT_TEXT}](${UPLOADED_PATH})"
 COVER_OPTION="$(tr '<' '\n' <"$BODY_FILE" | grep -F "$UPLOADED_PATH" | head -n 1)"
 COVER_IMAGE_ID="$(printf '%s' "$COVER_OPTION" | sed -n 's/.*value="\([0-9a-f-]\{36\}\)".*/\1/p')"
 [[ -n "$COVER_IMAGE_ID" ]] || fail "could not find uploaded media option"
@@ -203,13 +208,18 @@ assert_location /admin/media
 request GET /admin/media -b "$COOKIE_JAR" -c "$COOKIE_JAR"
 assert_status 200
 assert_contains "$UPDATED_ALT_TEXT"
+assert_contains "![${UPDATED_ALT_TEXT}](${UPLOADED_PATH})"
 
 form_post /admin/posts/preview \
     --data-urlencode "csrf_token=${CSRF_TOKEN}" \
     --data-urlencode "title=Preview ${TEST_SLUG}" \
     --data-urlencode "excerpt=Preview excerpt" \
     --data-urlencode "cover_image_id=${COVER_IMAGE_ID}" \
-    --data-urlencode $'body_markdown=# Preview\n\nThis is **rendered** with a cover image.'
+    --data-urlencode "body_markdown=# Preview
+
+This is **rendered** with a cover image.
+
+![Inline smoke image](${UPLOADED_PATH})"
 assert_status 200
 assert_contains "Preview ${TEST_SLUG}"
 assert_contains "$UPLOADED_PATH"
@@ -217,6 +227,7 @@ assert_contains "alt=\"${UPDATED_ALT_TEXT}\""
 assert_contains "loading=\"eager\""
 assert_contains "fetchpriority=\"high\""
 assert_contains "<strong>rendered</strong>"
+assert_contains "src=\"${UPLOADED_PATH}\""
 
 request GET /admin/posts -b "$COOKIE_JAR" -c "$COOKIE_JAR"
 assert_status 200

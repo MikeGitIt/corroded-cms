@@ -966,6 +966,7 @@ fn post_form_html(
     let default_status = post.map(|p| p.status.as_str()).unwrap_or("draft");
     let default_cover_image_id = post.and_then(|p| p.cover_image_id);
     let default_tags = post.map(|p| p.tag_slugs.join(", ")).unwrap_or_default();
+    let media_insert_tools = media_insert_tools_html(media_options);
     let media_options = media_options_html(media_options, default_cover_image_id);
     let workflow_button = workflow_submit_button(post);
 
@@ -1027,6 +1028,7 @@ fn post_form_html(
                 <span>Markdown</span>
                 <textarea name="body_markdown" rows="18">{}</textarea>
             </label>
+            {}
             <div class="form-actions">
                 <button type="submit">Save</button>
                 <button type="submit" formaction="/admin/posts/preview" formtarget="_blank" formnovalidate>Preview</button>
@@ -1045,6 +1047,7 @@ fn post_form_html(
         media_options,
         escape_html(&default_tags),
         escape_html(default_body),
+        media_insert_tools,
         workflow_button,
     );
 
@@ -1390,6 +1393,32 @@ fn tag_links_with_slugs(names: &[String], slugs: &[String]) -> String {
     body
 }
 
+fn media_insert_tools_html(media_options: &[MediaOption]) -> String {
+    if media_options.is_empty() {
+        return String::new();
+    }
+
+    let mut body = String::from(
+        r#"<section class="media-insert-tools" aria-label="Image Markdown snippets"><h2>Image snippets</h2><div class="media-insert-list">"#,
+    );
+    for media in media_options {
+        let alt_text = media.alt_text.as_deref().unwrap_or("");
+        let markdown = format!(
+            "![{}](/uploads/{})",
+            markdown_alt_text(alt_text),
+            media.storage_path
+        );
+        let _ = write!(
+            body,
+            r#"<label><span>{}</span><input value="{}" readonly></label>"#,
+            escape_html(&media.original_filename),
+            escape_html(&markdown),
+        );
+    }
+    body.push_str("</div></section>");
+    body
+}
+
 fn media_options_html(media_options: &[MediaOption], current: Option<Uuid>) -> String {
     let mut body = String::new();
     for media in media_options {
@@ -1415,6 +1444,10 @@ fn media_options_html(media_options: &[MediaOption], current: Option<Uuid>) -> S
         );
     }
     body
+}
+
+fn markdown_alt_text(value: &str) -> String {
+    value.replace('\\', "\\\\").replace(']', "\\]")
 }
 
 fn workflow_submit_button(post: Option<&PostDetail>) -> String {
