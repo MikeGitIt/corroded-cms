@@ -1,0 +1,84 @@
+# Corroded CMS
+
+Corroded CMS is a Rust-native blog CMS built with Leptos SSR, Axum, PostgreSQL, and SQLx. The MVP includes admin authentication, post drafting and publishing, tags, local image uploads, RSS, sitemap generation, CSRF protection, and security response headers.
+
+## Prerequisites
+
+- Rust nightly with `wasm32-unknown-unknown`
+- `cargo-leptos`
+- PostgreSQL 17, either local or via Docker Compose
+- `just` for the bundled task shortcuts
+
+Install the Rust-side tools:
+
+```bash
+rustup target add wasm32-unknown-unknown
+cargo install cargo-leptos
+```
+
+## Local Setup
+
+Create local configuration:
+
+```bash
+cp .env.example .env
+```
+
+Start PostgreSQL with Docker Compose:
+
+```bash
+just db-up
+```
+
+Create an admin user:
+
+```bash
+CORRODED_CMS_ADMIN_PASSWORD='TemporaryPass123!' \
+  cargo run -p corroded-cms -- create-admin \
+  --email admin@example.com \
+  --display-name Admin
+```
+
+Run the development server:
+
+```bash
+just dev
+```
+
+The app listens on `http://127.0.0.1:3000` by default.
+
+## Common Commands
+
+```bash
+just check       # cargo check --workspace
+just test        # cargo test --workspace
+just smoke       # endpoint smoke test against a running local server
+cargo leptos build
+```
+
+## Configuration
+
+Required environment variables are documented in `.env.example`:
+
+- `DATABASE_URL`
+- `BASE_URL`
+- `SESSION_SECRET`
+- `UPLOAD_DIR`
+- `ENVIRONMENT`
+- `SITE_NAME`
+- `SITE_DESCRIPTION`
+
+Optional runtime variables include `RUST_LOG`, `HOST`, `PORT`, and `MAX_UPLOAD_BYTES`.
+
+## Repository Layout
+
+- `app/` - Leptos app shell and CSS
+- `server/` - Axum server, admin/public routes, auth, feeds, uploads
+- `shared/` - shared validation and Markdown rendering logic
+- `migrations/` - SQLx PostgreSQL migrations
+- `scripts/` - local verification scripts
+- `SPECS/` - product requirements and implementation plan
+
+## License
+
+MIT. See `LICENSE`.
