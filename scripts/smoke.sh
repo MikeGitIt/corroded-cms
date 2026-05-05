@@ -150,6 +150,14 @@ form_post /admin/posts \
 assert_status 400
 assert_contains "invalid CSRF token"
 
+form_post /admin/posts/preview \
+    --data-urlencode "csrf_token=${CSRF_TOKEN}" \
+    --data-urlencode $'body_markdown=# Preview\n\nThis is **rendered**.\n\n<script>alert(1)</script>'
+assert_status 200
+assert_contains "Markdown Preview"
+assert_contains "<strong>rendered</strong>"
+assert_not_contains "<script>"
+
 request GET /admin/media -b "$COOKIE_JAR" -c "$COOKIE_JAR"
 assert_status 200
 assert_contains "Media"
@@ -195,6 +203,20 @@ assert_location /admin/media
 request GET /admin/media -b "$COOKIE_JAR" -c "$COOKIE_JAR"
 assert_status 200
 assert_contains "$UPDATED_ALT_TEXT"
+
+form_post /admin/posts/preview \
+    --data-urlencode "csrf_token=${CSRF_TOKEN}" \
+    --data-urlencode "title=Preview ${TEST_SLUG}" \
+    --data-urlencode "excerpt=Preview excerpt" \
+    --data-urlencode "cover_image_id=${COVER_IMAGE_ID}" \
+    --data-urlencode $'body_markdown=# Preview\n\nThis is **rendered** with a cover image.'
+assert_status 200
+assert_contains "Preview ${TEST_SLUG}"
+assert_contains "$UPLOADED_PATH"
+assert_contains "alt=\"${UPDATED_ALT_TEXT}\""
+assert_contains "loading=\"eager\""
+assert_contains "fetchpriority=\"high\""
+assert_contains "<strong>rendered</strong>"
 
 request GET /admin/posts -b "$COOKIE_JAR" -c "$COOKIE_JAR"
 assert_status 200
@@ -243,6 +265,13 @@ assert_contains "name=\"twitter:card\" content=\"summary_large_image\""
 assert_contains "${BASE_URL%/}${UPLOADED_PATH}"
 assert_contains "<strong>scripted</strong>"
 assert_not_contains "<script>"
+assert_contains "loading=\"eager\""
+assert_contains "fetchpriority=\"high\""
+DETAIL_COVER_PATH="$(tr '<' '\n' <"$BODY_FILE" | sed -n 's/^img class="post-cover" src="\([^"]*\)".*/\1/p' | head -n 1)"
+[[ "$DETAIL_COVER_PATH" == "$UPLOADED_PATH" ]] || fail "expected detail cover ${UPLOADED_PATH}, got ${DETAIL_COVER_PATH}"
+
+request GET "$DETAIL_COVER_PATH"
+assert_status 200
 
 form_post /admin/posts \
     --data-urlencode "csrf_token=${CSRF_TOKEN}" \
@@ -268,17 +297,38 @@ assert_not_contains "$DRAFT_TITLE"
 request GET "/blog/${DRAFT_SLUG}"
 assert_status 404
 
-form_post "${DRAFT_ACTION_PATH}/publish" \
-    --data-urlencode "csrf_token=${CSRF_TOKEN}"
+request GET "$DRAFT_EDIT_PATH" -b "$COOKIE_JAR" -c "$COOKIE_JAR"
+assert_status 200
+assert_contains "name=\"workflow_status\" value=\"published\""
+
+form_post "$DRAFT_ACTION_PATH" \
+    --data-urlencode "csrf_token=${CSRF_TOKEN}" \
+    --data-urlencode "title=${DRAFT_TITLE}" \
+    --data-urlencode "slug=${DRAFT_SLUG}" \
+    --data-urlencode "excerpt=Smoke test draft post" \
+    --data-urlencode "status=draft" \
+    --data-urlencode "workflow_status=published" \
+    --data-urlencode "cover_image_id=${COVER_IMAGE_ID}" \
+    --data-urlencode "tag_slugs=" \
+    --data-urlencode "body_markdown=Draft content"
 assert_status 303
 assert_location "$DRAFT_EDIT_PATH"
 
 request GET "/blog/${DRAFT_SLUG}"
 assert_status 200
 assert_contains "$DRAFT_TITLE"
+assert_contains "$UPLOADED_PATH"
 
-form_post "${DRAFT_ACTION_PATH}/unpublish" \
-    --data-urlencode "csrf_token=${CSRF_TOKEN}"
+form_post "$DRAFT_ACTION_PATH" \
+    --data-urlencode "csrf_token=${CSRF_TOKEN}" \
+    --data-urlencode "title=${DRAFT_TITLE}" \
+    --data-urlencode "slug=${DRAFT_SLUG}" \
+    --data-urlencode "excerpt=Smoke test draft post" \
+    --data-urlencode "status=published" \
+    --data-urlencode "workflow_status=draft" \
+    --data-urlencode "cover_image_id=${COVER_IMAGE_ID}" \
+    --data-urlencode "tag_slugs=" \
+    --data-urlencode "body_markdown=Draft content"
 assert_status 303
 assert_location "$DRAFT_EDIT_PATH"
 

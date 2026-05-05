@@ -65,6 +65,22 @@ pub struct PostForm {
     cover_image_id: String,
     #[serde(default)]
     tag_slugs: String,
+    #[serde(default)]
+    workflow_status: String,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct PostPreviewForm {
+    #[serde(default)]
+    csrf_token: String,
+    #[serde(default)]
+    title: String,
+    #[serde(default)]
+    excerpt: String,
+    #[serde(default)]
+    body_markdown: String,
+    #[serde(default)]
+    cover_image_id: String,
 }
 
 #[derive(Debug)]
@@ -223,6 +239,35 @@ pub async fn admin_update(
             Err(_) => server_error(error),
         },
     }
+}
+
+pub async fn admin_preview(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Form(form): Form<PostPreviewForm>,
+) -> Response {
+    if auth::current_admin(&state, &headers).await.is_none() {
+        return redirect("/admin/login");
+    }
+    if !auth::verify_csrf(&state, &headers, &form.csrf_token) {
+        return auth::csrf_rejection();
+    }
+    if form.body_markdown.len() > 1024 * 1024 {
+        return (StatusCode::BAD_REQUEST, "body must be 1 MiB or smaller").into_response();
+    }
+
+    let cover_image = match preview_cover_image(&state, &form.cover_image_id).await {
+        Ok(cover_image) => cover_image,
+        Err(error) => return (StatusCode::BAD_REQUEST, error.to_string()).into_response(),
+    };
+
+    markdown_preview_html(
+        &form.title,
+        &form.excerpt,
+        &render_markdown(&form.body_markdown),
+        cover_image.as_ref(),
+    )
+    .into_response()
 }
 
 pub async fn admin_archive(
@@ -567,6 +612,36 @@ async fn list_media_options(state: &AppState) -> Result<Vec<MediaOption>> {
         .collect()
 }
 
+async fn preview_cover_image(state: &AppState, cover_image_id: &str) -> Result<Option<MediaOption>> {
+    let cover_image_id = cover_image_id.trim();
+    if cover_image_id.is_empty() {
+        return Ok(None);
+    }
+
+    let id = Uuid::parse_str(cover_image_id).map_err(|_| anyhow!("cover image is invalid"))?;
+    let row = sqlx::query(
+        r#"
+        SELECT id, original_filename, storage_path, alt_text
+        FROM media_assets
+        WHERE id = $1
+        "#,
+    )
+    .bind(id)
+    .fetch_optional(&state.pool)
+    .await?;
+
+    let Some(row) = row else {
+        bail!("cover image was not found");
+    };
+
+    Ok(Some(MediaOption {
+        id: row.try_get("id")?,
+        original_filename: row.try_get("original_filename")?,
+        storage_path: row.try_get("storage_path")?,
+        alt_text: row.try_get("alt_text")?,
+    }))
+}
+
 async fn create_post(state: &AppState, user: &auth::AdminUser, form: PostForm) -> Result<Uuid> {
     let input = validate_post_form(form)?;
     let body_html = render_markdown(&input.body_markdown);
@@ -686,7 +761,12 @@ fn validate_post_form(form: PostForm) -> Result<ValidPostForm> {
         bail!("body must be 1 MiB or smaller");
     }
 
-    let status = form.status.trim().to_owned();
+    let workflow_status = form.workflow_status.trim();
+    let status = if workflow_status.is_empty() {
+        form.status.trim().to_owned()
+    } else {
+        workflow_status.to_owned()
+    };
     if !matches!(status.as_str(), "draft" | "published" | "archived") {
         bail!("status is invalid");
     }
@@ -887,6 +967,7 @@ fn post_form_html(
     let default_cover_image_id = post.and_then(|p| p.cover_image_id);
     let default_tags = post.map(|p| p.tag_slugs.join(", ")).unwrap_or_default();
     let media_options = media_options_html(media_options, default_cover_image_id);
+    let workflow_button = workflow_submit_button(post);
 
     let _ = write!(
         body,
@@ -948,6 +1029,8 @@ fn post_form_html(
             </label>
             <div class="form-actions">
                 <button type="submit">Save</button>
+                <button type="submit" formaction="/admin/posts/preview" formtarget="_blank" formnovalidate>Preview</button>
+                {}
             </div>
         </form>
         "#,
@@ -962,26 +1045,10 @@ fn post_form_html(
         media_options,
         escape_html(&default_tags),
         escape_html(default_body),
+        workflow_button,
     );
 
     if let Some(post) = post {
-        let workflow_action = match post.status.as_str() {
-            "draft" => Some(("publish", "Publish")),
-            "published" => Some(("unpublish", "Unpublish")),
-            _ => None,
-        };
-        if let Some((action, label)) = workflow_action {
-            let _ = write!(
-                body,
-                r#"
-                <form method="post" action="/admin/posts/{}/{}" class="workflow-form">
-                    {}
-                    <button type="submit">{}</button>
-                </form>
-                "#,
-                post.id, action, csrf_input, label,
-            );
-        }
         let _ = write!(
             body,
             r#"<p class="editor-meta">Updated {}</p>"#,
@@ -1055,6 +1122,58 @@ fn public_home_html(state: &AppState, posts: &[PostSummary]) -> Html<String> {
     body.push_str("</section>");
     body.push_str(&page_end());
     Html(body)
+}
+
+fn markdown_preview_html(
+    title: &str,
+    excerpt: &str,
+    body_html: &str,
+    cover_image: Option<&MediaOption>,
+) -> Html<String> {
+    let title = title.trim();
+    let title = if title.is_empty() {
+        "Markdown Preview"
+    } else {
+        title
+    };
+    let excerpt = excerpt.trim();
+    let cover_image = cover_image
+        .map(|media| {
+            cover_image_html_with_loading(
+                Some(media.storage_path.as_str()),
+                media.alt_text.as_deref(),
+                "post-cover",
+                "eager",
+                Some("high"),
+            )
+        })
+        .unwrap_or_default();
+    let mut body = page_start(title);
+    let _ = write!(
+        body,
+        r#"
+        <article class="post-detail">
+            <p class="eyebrow">Preview</p>
+            <h1>{}</h1>
+            {}
+            {}
+            <div class="post-body">{}</div>
+        </article>
+        "#,
+        escape_html(title),
+        preview_excerpt_html(excerpt),
+        cover_image,
+        body_html,
+    );
+    body.push_str(&page_end());
+    Html(body)
+}
+
+fn preview_excerpt_html(excerpt: &str) -> String {
+    if excerpt.is_empty() {
+        return String::new();
+    }
+    format!(r#"<p>{}</p>"#, escape_html(excerpt))
 }
 
 fn public_index_html(posts: &[PostSummary]) -> Html<String> {
@@ -1181,10 +1300,12 @@ fn public_detail_html(state: &AppState, post: &PostDetail) -> Html<String> {
             .unwrap_or_else(|| "Unpublished".to_owned()),
         escape_html(&post.title),
         tag_links_with_slugs(&post.tag_names, &post.tag_slugs),
-        cover_image_html(
+        cover_image_html_with_loading(
             post.cover_image_storage_path.as_deref(),
             post.cover_image_alt_text.as_deref(),
             "post-cover",
+            "eager",
+            Some("high"),
         ),
         post.body_html,
     );
@@ -1296,19 +1417,46 @@ fn media_options_html(media_options: &[MediaOption], current: Option<Uuid>) -> S
     body
 }
 
+fn workflow_submit_button(post: Option<&PostDetail>) -> String {
+    let Some(post) = post else {
+        return String::new();
+    };
+    let (status, label) = match post.status.as_str() {
+        "draft" => ("published", "Publish"),
+        "published" => ("draft", "Unpublish"),
+        _ => return String::new(),
+    };
+    format!(r#"<button type="submit" name="workflow_status" value="{status}">{label}</button>"#)
+}
+
 fn cover_image_html(
     storage_path: Option<&str>,
     alt_text: Option<&str>,
     class_name: &str,
 ) -> String {
+    cover_image_html_with_loading(storage_path, alt_text, class_name, "lazy", None)
+}
+
+fn cover_image_html_with_loading(
+    storage_path: Option<&str>,
+    alt_text: Option<&str>,
+    class_name: &str,
+    loading: &str,
+    fetchpriority: Option<&str>,
+) -> String {
     let Some(storage_path) = storage_path else {
         return String::new();
     };
+    let fetchpriority = fetchpriority
+        .map(|value| format!(r#" fetchpriority="{}""#, escape_html(value)))
+        .unwrap_or_default();
     format!(
-        r#"<img class="{}" src="/uploads/{}" alt="{}" loading="lazy">"#,
+        r#"<img class="{}" src="/uploads/{}" alt="{}" loading="{}"{}>"#,
         escape_html(class_name),
         escape_html(storage_path),
-        escape_html(alt_text.unwrap_or(""))
+        escape_html(alt_text.unwrap_or("")),
+        escape_html(loading),
+        fetchpriority,
     )
 }
 

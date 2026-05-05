@@ -125,6 +125,7 @@ async fn serve(config: AppConfig, pool: PgPool) -> Result<()> {
             get(posts::admin_list).post(posts::admin_create),
         )
         .route("/admin/posts/new", get(posts::admin_new))
+        .route("/admin/posts/preview", post(posts::admin_preview))
         .route("/admin/posts/{id}", post(posts::admin_update))
         .route("/admin/posts/{id}/edit", get(posts::admin_edit))
         .route("/admin/posts/{id}/archive", post(posts::admin_archive))
