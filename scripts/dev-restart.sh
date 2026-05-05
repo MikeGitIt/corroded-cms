@@ -23,24 +23,47 @@ load_env_file() {
 }
 
 stop_existing_server() {
-    local pids
-    pids="$(lsof -tiTCP:"$PORT" -sTCP:LISTEN 2>/dev/null || true)"
-    [[ -n "$pids" ]] || return 0
+    local listeners
+    listeners="$(lsof -nP -iTCP:"$PORT" -sTCP:LISTEN -F pc 2>/dev/null || true)"
+    [[ -n "$listeners" ]] || return 0
 
-    for pid in $pids; do
-        local command
-        command="$(ps -p "$pid" -o comm= 2>/dev/null || true)"
-        case "$command" in
-            *corroded-cms*|*corroded-*)
-                printf 'Stopping %s on port %s\n' "$command" "$PORT"
-                kill "$pid"
+    local pid=""
+    local command=""
+
+    while IFS= read -r field || [[ -n "$field" ]]; do
+        case "$field" in
+            p*)
+                if [[ -n "$pid" ]]; then
+                    stop_listener "$pid" "$command"
+                fi
+                pid="${field#p}"
+                command=""
                 ;;
-            *)
-                printf 'Port %s is used by %s (pid %s); not stopping it.\n' "$PORT" "${command:-unknown}" "$pid" >&2
-                exit 1
+            c*)
+                command="${field#c}"
                 ;;
         esac
-    done
+    done <<<"$listeners"
+
+    if [[ -n "$pid" ]]; then
+        stop_listener "$pid" "$command"
+    fi
+}
+
+stop_listener() {
+    local pid="$1"
+    local command="$2"
+
+    case "$command" in
+        *corroded-cms*|*corroded-*)
+            printf 'Stopping %s on port %s\n' "$command" "$PORT"
+            kill "$pid"
+            ;;
+        *)
+            printf 'Port %s is used by %s (pid %s); not stopping it.\n' "$PORT" "${command:-unknown}" "$pid" >&2
+            exit 1
+            ;;
+    esac
 }
 
 wait_for_port() {
