@@ -222,6 +222,9 @@ form_post /admin/posts \
     --data-urlencode "tag_slugs=" \
     --data-urlencode "body_markdown=Draft content"
 assert_status 303
+DRAFT_EDIT_PATH="$(header_value location)"
+[[ "$DRAFT_EDIT_PATH" == /admin/posts/*/edit ]] || fail "expected draft edit redirect, got ${DRAFT_EDIT_PATH}"
+DRAFT_ACTION_PATH="${DRAFT_EDIT_PATH%/edit}"
 
 request GET "/admin/posts?status=draft&q=${DRAFT_SLUG}" -b "$COOKIE_JAR" -c "$COOKIE_JAR"
 assert_status 200
@@ -230,6 +233,23 @@ assert_contains "$DRAFT_TITLE"
 request GET "/admin/posts?status=published&q=${DRAFT_SLUG}" -b "$COOKIE_JAR" -c "$COOKIE_JAR"
 assert_status 200
 assert_not_contains "$DRAFT_TITLE"
+
+request GET "/blog/${DRAFT_SLUG}"
+assert_status 404
+
+form_post "${DRAFT_ACTION_PATH}/publish" \
+    --data-urlencode "csrf_token=${CSRF_TOKEN}"
+assert_status 303
+assert_location "$DRAFT_EDIT_PATH"
+
+request GET "/blog/${DRAFT_SLUG}"
+assert_status 200
+assert_contains "$DRAFT_TITLE"
+
+form_post "${DRAFT_ACTION_PATH}/unpublish" \
+    --data-urlencode "csrf_token=${CSRF_TOKEN}"
+assert_status 303
+assert_location "$DRAFT_EDIT_PATH"
 
 request GET "/blog/${DRAFT_SLUG}"
 assert_status 404

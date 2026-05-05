@@ -213,6 +213,44 @@ pub async fn admin_archive(
     }
 }
 
+pub async fn admin_publish(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Path(id): Path<Uuid>,
+    Form(form): Form<auth::CsrfForm>,
+) -> Response {
+    if auth::current_admin(&state, &headers).await.is_none() {
+        return redirect("/admin/login");
+    }
+    if !auth::verify_csrf(&state, &headers, &form.csrf_token) {
+        return auth::csrf_rejection();
+    }
+
+    match set_status(&state, id, "published").await {
+        Ok(()) => redirect(format!("/admin/posts/{id}/edit")),
+        Err(error) => server_error(error),
+    }
+}
+
+pub async fn admin_unpublish(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Path(id): Path<Uuid>,
+    Form(form): Form<auth::CsrfForm>,
+) -> Response {
+    if auth::current_admin(&state, &headers).await.is_none() {
+        return redirect("/admin/login");
+    }
+    if !auth::verify_csrf(&state, &headers, &form.csrf_token) {
+        return auth::csrf_rejection();
+    }
+
+    match set_status(&state, id, "draft").await {
+        Ok(()) => redirect(format!("/admin/posts/{id}/edit")),
+        Err(error) => server_error(error),
+    }
+}
+
 pub async fn blog_index(State(state): State<AppState>) -> Response {
     match list_public_posts(&state).await {
         Ok(posts) => public_index_html(&posts).into_response(),
@@ -510,11 +548,22 @@ async fn update_post(state: &AppState, id: Uuid, form: PostForm) -> Result<()> {
 }
 
 async fn set_status(state: &AppState, id: Uuid, status: &str) -> Result<()> {
-    sqlx::query("UPDATE posts SET status = $1, updated_at = now() WHERE id = $2")
-        .bind(status)
-        .bind(id)
-        .execute(&state.pool)
-        .await?;
+    sqlx::query(
+        r#"
+        UPDATE posts
+        SET status = $1,
+            published_at = CASE
+                WHEN $1 = 'published' AND published_at IS NULL THEN now()
+                ELSE published_at
+            END,
+            updated_at = now()
+        WHERE id = $2
+        "#,
+    )
+    .bind(status)
+    .bind(id)
+    .execute(&state.pool)
+    .await?;
     Ok(())
 }
 
@@ -806,6 +855,23 @@ fn post_form_html(
     );
 
     if let Some(post) = post {
+        let workflow_action = match post.status.as_str() {
+            "draft" => Some(("publish", "Publish")),
+            "published" => Some(("unpublish", "Unpublish")),
+            _ => None,
+        };
+        if let Some((action, label)) = workflow_action {
+            let _ = write!(
+                body,
+                r#"
+                <form method="post" action="/admin/posts/{}/{}" class="workflow-form">
+                    {}
+                    <button type="submit">{}</button>
+                </form>
+                "#,
+                post.id, action, csrf_input, label,
+            );
+        }
         let _ = write!(
             body,
             r#"<p class="editor-meta">Updated {}</p>"#,

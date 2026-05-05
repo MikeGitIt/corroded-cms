@@ -373,6 +373,10 @@ button:focus {
     margin-top: 1rem;
 }
 
+.workflow-form {
+    margin-top: 1rem;
+}
+
 .danger-form button {
     background: #be123c;
 }
